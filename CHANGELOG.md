@@ -2,6 +2,13 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.4.3] - 2026-11-22
+
+### ✨ Added
+
+- **Gyro & touchpad:** choose Steam Controller, Xbox Elite or DualSense emulation on the Legion Go 2.
+  The selector is available in the Decky panel and Desktop app.
+
 ## [2.4.2] - 2026-11-12
 
 ### ✨ Added

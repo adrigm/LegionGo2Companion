@@ -32,4 +32,4 @@ python tests/native_capture.py --exe /tmp/companion-native/legiongo2companion --
 # The bundle itself is verified by `npm run package` (check-desktop-build.mjs --runtime): it needs
 # dist/desktop/rpc-methods.json, which `npm run build` writes after this script.
 # scripts/check-legacy-updaters.py reads the updaters of these releases (the shared checkout has no tags).
-git fetch --no-tags --depth=1 origin 'refs/tags/2.1.0:refs/tags/2.1.0' 'refs/tags/2.2.0:refs/tags/2.2.0'
+git fetch --no-tags --depth=1 https://github.com/Rayekkk/LegionGo2Companion.git 'refs/tags/2.1.0:refs/tags/2.1.0' 'refs/tags/2.2.0:refs/tags/2.2.0'
