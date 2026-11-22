@@ -6,7 +6,7 @@ class TabsHook {
   removeById(id) { this.tabs = this.tabs.filter(tab => tab.id !== id); }
   render(entries) {
     if (entries.filter(tab => tab.decky).length !== this.tabs.length) {
-      for (const tab of this.tabs) entries.push({ key: tab.id, decky: true });
+      for (const tab of this.tabs) entries.push({ key: tab.id, decky: true, tab: tab.icon });
     }
   }
 }
@@ -26,18 +26,20 @@ let shortcut = register();
 assert.equal(shortcut.state().enabled, false);
 shortcut.set(true);
 const id = hook.tabs.at(-1).id;
-assert.equal(hook.tabs.at(-1).icon.props.children[0].props.children, `#quickaccess_tab_${id} { order: -1; }`);
+assert.equal(hook.tabs.at(-1).icon, 'icon', 'the icon does not reorder a separate visual list');
 assert.equal(shortcut.state().registered, true);
 hook.render(rendered);
-const entry = rendered.at(-1);
+const entry = rendered[0];
 fire('interval');
 hook.render(rendered);
-assert.deepEqual(ids(), [1, 2, 3, 999, 519, id]);
-assert.equal(rendered.at(-1), entry, 'reopening preserves the mounted panel');
-assert.equal(rendered[3], originalTabs[3], 'Steam’s focus indices and the mounted Decky panel stay stable');
+assert.deepEqual(ids(), [id, 1, 2, 3, 999, 519]);
+assert.equal(rendered[0], entry, 'reopening preserves the mounted panel');
+assert.equal(rendered[4], originalTabs[3], 'the mounted Decky panel is preserved');
+assert.equal(rendered[rendered.findIndex(tab => tab === native[0]) - 1], entry,
+  'moving up from the first system tab reaches Companion');
 const fresh = [...native];
 hook.render(fresh);
-assert.deepEqual(ids(fresh), [1, 2, 3, 999, 519, id], 'fresh Quick Access preserves the native indices');
+assert.deepEqual(ids(fresh), [id, 1, 2, 3, 999, 519], 'fresh Quick Access uses the same native order');
 shortcut.set(false);
 hook.render(rendered);
 assert.deepEqual(ids(), [1, 2, 3, 999, 519]);

@@ -13,6 +13,7 @@ const deleteProfile = rpc<[string], EmulationStatus>("emulation_delete_profile")
 const setSteamMenu = rpc<[boolean], EmulationStatus>("emulation_set_steam_menu");
 const testSticks = rpc<[], StickTest>("emulation_test_sticks");
 const reportApp = rpc<[string, string, boolean], object>("emulation_report_app");
+const RAGNAROK_APP = "2322010";
 
 const visibleQamViews = new Set<symbol>();
 let publishQam: (() => void) | undefined;
@@ -156,6 +157,7 @@ export function EmulationPage({ visible }: { visible: boolean }) {
   }));
   const validChoice = (choice: unknown): choice is EmulationMode => choice === "system" || status.options.some(id => id === choice);
   const playStation = isPlayStation(status.active);
+  const ragnarok = status.running_app === RAGNAROK_APP || app === RAGNAROK_APP;
   const sonyPid = status.active === "ds5-edge" ? 0x0df2 : 0x0ce6;
   const detected = controllers?.some(item => item.unVendorID === 0x054c && item.unProductID === sonyPid);
 
@@ -194,6 +196,7 @@ export function EmulationPage({ visible }: { visible: boolean }) {
     {playStation && <PanelSection title="PlayStation in Steam">
       {detected !== undefined && infoRow("Steam controller list", detected ? "Steam reports a matching PlayStation controller." : "Steam does not list a matching PlayStation controller.")}
       {infoRow("Steam Input", "Enable PlayStation controller support in Steam Settings → Controller to use Steam mapping. For native PlayStation input, use the game's Steam Input override.")}
+      {ragnarok && infoRow("God of War Ragnarök", "If the sticks work in Steam but fail in the game, quit the game. Select Proton Experimental, disable Steam Input for Ragnarök, and try SteamDeck=0 %command% in its launch options to test native DualSense. Start the game with DualSense already active.")}
       {steamInput()?.ShowControllerSettings && <PanelSectionRow><ButtonItem layout="below" onClick={() => steamInput()?.ShowControllerSettings?.()}>Open Steam controller settings</ButtonItem></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" disabled={busy} description="Move both sticks through their full range for four seconds."
         onClick={() => { setStickTest(null); void perform(testSticks, setStickTest); }}>Test PlayStation sticks</ButtonItem></PanelSectionRow>

@@ -3,7 +3,7 @@ import { PanelSectionRow, ToggleField } from "@decky/ui";
 import { type ReactNode, useEffect, useState } from "react";
 
 type Tab = { id: number; title: ReactNode; content: ReactNode; icon: ReactNode; owner?: string };
-type RenderedTab = { key?: number | string; decky?: boolean };
+type RenderedTab = { key?: number | string; decky?: boolean; tab?: ReactNode };
 type TabsHook = {
   tabs: Tab[];
   add(tab: Tab): void;
@@ -21,38 +21,47 @@ function tabsHook() {
   return hook && Array.isArray(hook.tabs) && typeof hook.add === "function" && typeof hook.removeById === "function" ? hook : undefined;
 }
 
-// Some Decky builds reuse the rendered array and compare only the number of Decky tabs.
-// Reconcile our entry before that comparison. Keep Steam's tab array order for focus/navigation.
+// Reconcile the cached entries before Decky counts them. Use Steam's actual tab order
+// for both display and focus so directional controls can reach the first tab.
 function reconcileCachedTab(hook: TabsHook, tab: Tab) {
   const render = hook.render;
   if (typeof render !== "function" || Object.prototype.hasOwnProperty.call(hook, "render")) return;
   let disposed = false;
   const isShortcut = (entry: RenderedTab) => entry?.decky && String(entry.key) === String(tab.id);
   const wrapped: NonNullable<TabsHook["render"]> = function (this: TabsHook, entries, visible) {
-    const enabled = this.tabs.some(entry => entry.id === tab.id && entry.owner === OWNER);
-    if (!enabled) {
-      for (let i = entries.length - 1; i >= 0; i--) if (isShortcut(entries[i])) entries.splice(i, 1);
-    } else if (entries.some(entry => entry?.decky) && !entries.some(isShortcut)) {
+    const current = this.tabs.find(entry => entry.id === tab.id);
+    const enabled = current?.owner === OWNER;
+    // When reloading, discard the prior Companion element (including its CSS).
+    if (!current || enabled) {
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (isShortcut(entries[i]) && (!current || entries[i].tab !== current.icon)) entries.splice(i, 1);
+      }
+    }
+    if (enabled && entries.some(entry => entry?.decky) && !entries.some(isShortcut)) {
       const next: RenderedTab[] = [];
       const shortcutHook = Object.create(this) as TabsHook;
-      shortcutHook.tabs = this.tabs.filter(entry => entry.id === tab.id && entry.owner === OWNER);
+      shortcutHook.tabs = [current];
       render.call(shortcutHook, next, visible);
       const shortcut = next.find(isShortcut);
       if (shortcut) entries.push(shortcut);
     }
     if (!enabled && disposed && hook.render === wrapped) delete hook.render;
-    return render.call(this, entries, visible);
+    const result = render.call(this, entries, visible);
+    if (enabled) {
+      const index = entries.findIndex(isShortcut);
+      if (index > 0) {
+        const [shortcut] = entries.splice(index, 1);
+        entries.unshift(shortcut);
+      }
+    }
+    return result;
   };
   hook.render = wrapped;
   return () => { disposed = true; };
 }
 
 export function createQamShortcut(view: Omit<Tab, "id" | "owner">) {
-  const tab = {
-    ...view, id: TAB_ID, owner: OWNER,
-    // Place the button visually first without reindexing Steam's native panel list.
-    icon: <><style>{`#quickaccess_tab_${TAB_ID} { order: -1; }`}</style>{view.icon}</>,
-  };
+  const tab = { ...view, id: TAB_ID, owner: OWNER };
   let state: State = { enabled: false, registered: false };
   const listeners = new Set<(next: State) => void>();
   let registeredWith: TabsHook | undefined;
@@ -95,9 +104,10 @@ export function createQamShortcut(view: Omit<Tab, "id" | "owner">) {
       }
       if (matches.length !== 1 || matches[0] !== tab) {
         remove(hook);
-        releaseRender ??= reconcileCachedTab(hook, tab);
         hook.add(tab);
       }
+      // If another plugin owns the renderer, keep Decky's normal navigable position.
+      releaseRender ??= reconcileCachedTab(hook, tab);
       const registered = hook.tabs.includes(tab) && hook.tabs.some(existing => existing.id === DECKY_TAB_ID);
       publish({ enabled: true, registered, error: registered ? undefined : "Decky did not register the shortcut." });
     } catch {
@@ -139,6 +149,6 @@ export function QamShortcutSetting({ shortcut }: { shortcut: ReturnType<typeof c
   const [value, setValue] = useState(shortcut.state);
   useEffect(() => shortcut.watch(setValue), [shortcut]);
   return <PanelSectionRow><ToggleField label="Show Companion in Quick Access" checked={value.enabled}
-    description={value.error || (value.registered ? "Shortcut added. Reopen Quick Access to see it." : "Add Companion at the top of Quick Access.")}
+    description={value.error || (value.registered ? "Shortcut added. Reopen Quick Access to see it." : "Add Companion to Quick Access.")}
     onChange={checked => shortcut.set(checked)} /></PanelSectionRow>;
 }

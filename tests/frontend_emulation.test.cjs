@@ -41,6 +41,11 @@ run(async () => {
     virtual: { reports: 12, span: [0, 0, 0, 0] } });
   await settle();
   assert.match(text(h.render()), /did not reach the virtual DualSense/);
+  assert.doesNotMatch(text(h.render()), /SteamDeck=0/, 'game-specific help stays out of unrelated games');
+  h.fire('interval');
+  h.respond('emulation_get_status', { ...saved, active: 'ds5-edge', effective: 'ds5-edge', running_app: '2322010', running_name: 'God of War Ragnarök' });
+  await settle();
+  assert.match(text(h.render()), /SteamDeck=0 %command%/, 'Ragnarök shows its native-controller compatibility settings');
   h.unmount();
   assert.equal(steamList, undefined);
 });

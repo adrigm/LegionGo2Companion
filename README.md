@@ -477,6 +477,8 @@ To create a game profile, open the module while the game is running. Select a co
 
 Close Quick Access after selecting a controller to let the switch complete. For Steam remapping, enable PlayStation controller support in Steam's controller settings. The PlayStation section shows whether Steam lists the active controller. **Test PlayStation sticks** compares the Legion Go 2 and virtual DualSense axes over four seconds. Start the game after selecting the controller if the game does not handle controller changes during play. Use the game's Steam Input override when it needs direct PlayStation input.
 
+For **God of War Ragnarök**, Valve's Proton disables direct Sony HID access if the game runs with `SteamDeck=1`. If the analog sticks work in Steam but fail in Ragnarök, close the game and try Proton Experimental with `SteamDeck=0 %command%` as a launch option and Steam Input disabled for Ragnarök. Activate DualSense before launching the game. This retry leaves other games' settings alone. [Valve's Proton change](https://github.com/ValveSoftware/Proton/commit/07a06297a968e6978b7edbec793fb45b5147eeae)
+
 With DualSense Edge active, Steam Input can map Y1 to left Fn, Y2 to left paddle, Y3 to right Fn and M3 to right paddle. The virtual Edge also reports gyro. Set its motion source in **Gyro & touchpad**.
 
 ### Gyro & touchpad

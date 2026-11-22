@@ -2,6 +2,11 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.3] - 2026-11-22
+
+- **Quick Access:** put Companion first in the tab list used for directional navigation.
+- **Controller emulation:** show native DualSense compatibility settings for God of War Ragnarök.
+
 ## [2.5.2] - 2026-11-22
 
 - **Controller emulation:** defer changes until Quick Access closes and allow InputPlumber more time to attach its targets. Steam observes the normal device connection events.
