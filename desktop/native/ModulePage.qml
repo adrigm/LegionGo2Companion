@@ -41,7 +41,6 @@ RowLayout {
     property string applyingModule:""
     property real tick:backend.now()
     property bool controllerDetails:false
-    property string emulationGame:""
     property var wifiCheck:null
     onTdpScopeChanged: { powerNotice=""; backend.cpuApp=powerTarget(); backend.cpuAc=tdpScope==="ac"; }
     // Several cards share two equal columns on a wide page: in Decky order each card goes to the
@@ -51,22 +50,6 @@ RowLayout {
     spacing:theme.gap
     function s(method) { return backend ? backend.state(method) : {}; }
     function emulation() { return s("emulation_get_status"); }
-    function emulationGames() {
-        const value=emulation(),profiles=value.profiles || {};
-        const games=Object.keys(profiles).map(id=>({id:id,label:profiles[id].name}));
-        if(value.running_app && !games.some(game=>game.id===value.running_app)) games.unshift({id:value.running_app,label:value.running_name || value.running_app});
-        return games;
-    }
-    function emulationApp() {
-        const games=emulationGames();
-        return games.some(game=>game.id===emulationGame)?emulationGame:emulation().running_app || games[0]?.id || "";
-    }
-    function emulationProfile() { return emulation().profiles?.[emulationApp()]; }
-    function gameController() { return emulationProfile()?.mode || emulation().selected || "system"; }
-    function saveEmulationProfile(mode,enabled) {
-        const game=emulationGames().find(item=>item.id===emulationApp());
-        if(game)change("emulation_set_profile",[game.id,game.label,mode,enabled]);
-    }
     function firmwareFresh() {
         const value=s("firmware_get_status");
         return tick>=0 && backend.connected && backend.age("firmware_get_status")<8 && !backend.readErrors?.firmware_get_status &&
@@ -446,26 +429,9 @@ RowLayout {
                 action("Restore defaults","remap_restore_defaults",null,{visible:()=>s("remap_get_status").supported===true})
             ]}],
             emulation:[{title:"Controller emulation",fields:[
-                notice("",()=>Gyro.emulationNote(emulation())),
-                choices("Default controller",()=>emulation().selected,v=>change("emulation_set_default",[v]),()=>Gyro.emulationOptions(emulation()),
-                    {available:()=>!!emulation().active,note:"Used when the running game has no enabled profile."}),
-                switcher("Steam Controller in Steam menus",()=>emulation().steam_menu,"emulation_set_steam_menu",null,
-                    {available:()=>!!emulation().steam_menu || !!emulation().options?.includes("steam")}),
-                action("Test PlayStation sticks","emulation_test_sticks",null,{visible:()=>Gyro.isPlayStation(emulation().active),
-                    note:"Move both sticks through their full range for four seconds."}),
-                text("Legion Go 2 sticks",()=>Gyro.stickTestText(s("emulation_test_sticks").physical),
-                    {visible:()=>Gyro.isPlayStation(emulation().active) && s("emulation_test_sticks").mode===emulation().active}),
-                text("Virtual DualSense sticks",()=>Gyro.stickTestText(s("emulation_test_sticks").virtual),
-                    {visible:()=>Gyro.isPlayStation(emulation().active) && s("emulation_test_sticks").mode===emulation().active}),
-                text("DualSense Edge",()=>Gyro.EDGE_BUTTONS,{visible:()=>emulation().active==="ds5-edge" || emulation().effective==="ds5-edge",
-                    note:"Gyroscope is available to Steam Input and games."})
-            ]},{title:"Game profiles",fields:[
-                notice("Add a game profile",()=>emulationApp()?"":"Launch a Steam game to add a profile."),
-                choices("Game",emulationApp,v=>{emulationGame=v;},emulationGames,{visible:()=>!!emulationApp()}),
-                field("Apply profile automatically","toggle",()=>emulationProfile()?.enabled===true,v=>saveEmulationProfile(gameController(),v),{visible:()=>!!emulationApp()}),
-                choices("Controller for this game",gameController,v=>saveEmulationProfile(v,emulationProfile()?.enabled===true),()=>Gyro.emulationOptions(emulation()),
-                    {visible:()=>!!emulationApp(),available:()=>!!emulation().active}),
-                action("Remove profile","emulation_delete_profile",()=>[emulationApp()],{visible:()=>!!emulationProfile()})
+                notice("",()=>emulation().reason || ""),
+                choices("Emulated controller",()=>emulation().selected,v=>change("emulation_set_default",[v]),()=>Gyro.emulationOptions(emulation()),
+                    {available:()=>!!emulation().active})
             ]}],
             controller:[{title:"Gyro & touchpad",column:0,barTitle:"Troubleshooting",fields:[
                 notice("",()=>gyro().recovery_pending?"A controller change didn't finish. Restore the previous settings first.":gyro().error || (gyro().available===false || gyro().conflict?gyro().reason || "":"")),

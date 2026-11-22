@@ -314,25 +314,23 @@ TestCase {
         verify(!panel.fieldEnabled("controller",field("controller","Controller test")),"No physical controller: no test");
     }
     // Shown only where both pads have the timer; nothing is claimed or written until the user picks a time.
-    function test_controllerEmulationHasItsOwnPageAndGameProfile() {
+    function test_controllerEmulationHasOneSelector() {
         fake.data=Object.assign({},fake.data,{get_version:{blocked:false,modules:{controller:{enabled:true,ready:true},emulation:{enabled:true,ready:true}}}});
         panel.page="controller";
         verify(!panel.cards.some(card=>card.title==="Controller emulation"));
         panel.page="emulation";
-        compare(panel.cards.map(card=>card.title).join(","),"Controller emulation,Game profiles");
-        const selector=field("emulation","Default controller");
+        compare(panel.cards.map(card=>card.title).join(","),"Controller emulation");
+        const selector=field("emulation","Emulated controller");
         verify(!selector.available());
-        fake.data=Object.assign({},fake.data,{emulation_get_status:{selected:"system",active:"steam",effective:"system",
-            options:["steam","xbox-elite","ds5","ds5-edge"],running_app:"42",running_name:"Example Game",profiles:{},reason:""}});
+        fake.data=Object.assign({},fake.data,{emulation_get_status:{selected:"system",active:"steam",
+            options:["steam","xbox-elite","ds5","ds5-edge"],reason:""}});
         verify(selector.available());
         compare(selector.get(),"system");
         compare(selector.choices().map(option=>option.id).join(","),"system,steam,xbox-elite,ds5,ds5-edge");
         selector.set("ds5");
         compare(fake.calls[0].method,"emulation_set_default");
         compare(fake.calls[0].args.join(","),"ds5");
-        field("emulation","Controller for this game").set("ds5-edge");
-        compare(fake.calls[1].method,"emulation_set_profile");
-        compare(fake.calls[1].args.join(","),"42,Example Game,ds5-edge,false");
+        compare(fake.calls.length,1);
     }
     function test_controllerSleepWaitsForTheUsersChoice() {
         fake.data=Object.assign({},fake.data,{get_version:{blocked:false,modules:{controller:{enabled:true,ready:true}}},

@@ -9,8 +9,8 @@ for(const file of readdirSync(resolve(root,'src')).filter(name=>/\.tsx?$/.test(n
   const code=readFileSync(resolve(root,'src',file),'utf8');
   for(const match of code.matchAll(/\b(?:callable|rpc)\s*<[\s\S]*?>\s*\(\s*"([a-z_]+)"/g))methods.add(match[1]);
 }
-// Steam foreground-app hints need Steam's view; the rest is unused by the native app.
-for(const name of ['set_active_app','vibe_set_active_app','emulation_report_app','is_ready'])methods.delete(name);
+// Steam app and Quick Access state is only sent by the Decky frontend.
+for(const name of ['set_active_app','vibe_set_active_app','emulation_report_qam','is_ready'])methods.delete(name);
 // Read-only public RPCs that only the native app shows.
 for(const name of ['list_game_profiles'])methods.add(name);
 const data=JSON.stringify([...methods].sort(),null,2)+'\n';

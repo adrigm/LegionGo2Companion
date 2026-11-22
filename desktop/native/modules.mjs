@@ -11,7 +11,7 @@ const MODULE_DESCRIPTIONS = {
   rgb: "Stick lights and power button light.",
   remap: "The two extra buttons on the left controller.",
   controller: "Gyro source and controller test.",
-  emulation: "Virtual controller and per-game profiles. Off restores the system controller.",
+  emulation: "Choose the emulated controller. Off restores the system controller.",
   battery: "Charge limit of about 80%.",
   display: "Games see the screen's real HDR brightness.",
   wifi: "Wi-Fi band preference.",

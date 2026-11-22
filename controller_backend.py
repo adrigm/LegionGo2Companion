@@ -27,7 +27,6 @@ import stat
 import threading
 import time
 from collections import deque
-from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -49,8 +48,6 @@ _offload = functools.partial(module_runtime.offload, 'controller')
 settings = SettingsManager("controller_settings", decky.DECKY_PLUGIN_SETTINGS_DIR)
 HID_CLASS = Path("/sys/class/hidraw")
 DMI_ROOT = Path("/sys/class/dmi/id")
-SONY_UHID_ROOT = Path("/sys/devices/virtual/misc/uhid")
-STICK_TEST_SECONDS = 4.0
 GO2_PIDS = {0x61EB, 0x61EC, 0x61ED, 0x61EE}  # Also a Go 1 on the 2025 controller firmware.
 # InputPlumber's name for the controller. It already flips the Go 1's yaw sign by DMI (83E1),
 # and Companion only chooses which IMU it forwards, so no axis is changed here.
@@ -206,83 +203,6 @@ def _open_verified_hidraw(record: dict) -> int:
     except BaseException:
         os.close(fd)
         raise
-
-
-def _sony_hidraw(mode: str) -> dict:
-    product = controller_emulation.SONY_PRODUCTS.get(mode)
-    if not product:
-        raise ControllerError("Select DualSense or DualSense Edge before testing.")
-    identity = re.compile(rf"000[35]:054C:{product}\.[0-9A-F]+", re.IGNORECASE)
-    candidates = []
-    for device in SONY_UHID_ROOT.glob("*"):
-        if not identity.fullmatch(device.name) or not device.is_dir():
-            continue
-        for entry in device.glob("hidraw/hidraw*"):
-            devnum = _text(entry / "dev")
-            if re.fullmatch(r"hidraw[0-9]+", entry.name) and devnum and re.fullmatch(r"[0-9]+:[0-9]+", devnum):
-                candidates.append({"path": f"/dev/{entry.name}", "devnum": devnum})
-    if len(candidates) != 1:
-        raise ControllerError("A single virtual PlayStation controller could not be identified.")
-    return candidates[0]
-
-
-def _physical_sticks(packet: bytes) -> bytes | None:
-    # Legion Go 2 XInputDataReport, whose axes occupy bytes 14 through 17.
-    if len(packet) in (60, 64) and packet[:3] == b"\x04\x3c\x74":
-        return packet[14:18]
-    return None
-
-
-def _playstation_sticks(packet: bytes) -> bytes | None:
-    # The 0x01 USB report starts with axes after the ID. The full Bluetooth
-    # 0x31 report has one additional header byte before the same four axes.
-    if len(packet) == 64 and packet[0] == 0x01:
-        return packet[1:5]
-    if len(packet) == 78 and packet[0] == 0x31:
-        return packet[2:6]
-    return None
-
-
-def _sample_sticks(readers: dict) -> dict:
-    bounds = {name: {"reports": 0, "min": [255] * 4, "max": [0] * 4} for name, _ in readers.values()}
-    deadline = time.monotonic() + STICK_TEST_SECONDS
-    while (remaining := deadline - time.monotonic()) > 0:
-        readable, _, _ = select.select(list(readers), [], [], remaining)
-        for fd in readable:
-            name, decode = readers[fd]
-            try:
-                data = os.read(fd, 128)
-            except BlockingIOError:
-                continue
-            if not data:
-                raise ControllerError("The controller disconnected during the test.")
-            axes = decode(data)
-            if axes is None:
-                continue
-            result = bounds[name]
-            result["reports"] += 1
-            for index, value in enumerate(axes):
-                result["min"][index] = min(result["min"][index], value)
-                result["max"][index] = max(result["max"][index], value)
-    return {name: {"reports": data["reports"], "span": [hi - lo for lo, hi in zip(data["min"], data["max"])]
-                   if data["reports"] else None} for name, data in bounds.items()}
-
-
-def test_playstation_sticks(mode: str) -> dict:
-    physical = _hid_inventory()[0]
-    if _console() != "go2" or not physical:
-        raise ControllerError("The Legion Go 2 controller is unavailable.")
-    sony = _sony_hidraw(mode)
-    try:
-        with ExitStack() as handles:
-            physical_fd = _open_reader(physical)
-            handles.callback(os.close, physical_fd)
-            sony_fd = _open_verified_hidraw(sony)
-            handles.callback(os.close, sony_fd)
-            return {"mode": mode, **_sample_sticks({physical_fd: ("physical", _physical_sticks),
-                                                   sony_fd: ("virtual", _playstation_sticks)})}
-    except OSError as exc:
-        raise ControllerError("Could not read both controllers. Verify the active mode and retry.") from exc
 
 
 def _filter_map(raw: Any) -> dict[str, list[str]]:
@@ -845,7 +765,7 @@ class Plugin:
                 raise ControllerError("This InputPlumber build does not support the selected controller.")
             self._status_cache = None
             # A Linux Deck target may already be the one this system uses for Steam.
-            if mode != "system" and emulation.GAMEPADS[active] == mode:
+            if mode == "steam" and emulation.GAMEPADS[active] == mode:
                 target = active
             if apply:
                 emulation.switch(device, current, target)
@@ -864,12 +784,12 @@ class Plugin:
             self._emulation_retry_at = 0.0
             return target if apply else None
 
-    def _sync_emulation(self, *, release=False, now=None, resumed=False, override=None) -> str | None:
+    def _sync_emulation(self, *, release=False, now=None, resumed=False) -> str | None:
         with self._operation:
             saved = _emulation_choice()
             if _console() != "go2" or (release and not self._emulation_owner):
                 return
-            if not (saved or override or self._emulation_owner):
+            if not (saved or self._emulation_owner):
                 return
             emulation = controller_emulation
             now = time.monotonic() if now is None else now
@@ -902,13 +822,9 @@ class Plugin:
                     self._emulation_baseline = None
                     self._emulation_requested = None
                     return
-                target = (emulation.modes(device).get(override) if override not in (None, "system")
-                          else baseline if override == "system" or not saved else saved["target"])
-                if target is None:
-                    target = saved["target"] if saved else baseline
-                managed = saved is not None or override is not None
+                target = saved["target"] if saved else baseline
                 if active == target:
-                    if not managed:
+                    if saved is None:
                         self._emulation_owner = None
                         self._emulation_baseline = None
                         self._emulation_requested = None
@@ -935,7 +851,7 @@ class Plugin:
                 # same reset or absence on two ticks before sending another request.
                 candidate = (owner, tuple(sorted(current)), target)
                 previous, self._emulation_candidate = self._emulation_candidate, candidate
-                policy_change = changed and not missing and (owned or (override is not None and reset))
+                policy_change = changed and not missing and owned
                 if (candidate != previous or now < self._emulation_retry_at) and not policy_change:
                     return
                 self._emulation_requested = target

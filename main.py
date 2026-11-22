@@ -84,7 +84,7 @@ STARTING_STOP_WAIT_S = 2.0
 # about two minutes of retries, then the next start tries again.
 BAND_RESTORE_RETRY_S = 20.0
 BAND_RESTORE_ATTEMPTS = 6
-_ADVISORY_RPCS = frozenset({'set_panel_active', 'set_active_app', 'vibe_set_active_app', 'emulation_report_app'})
+_ADVISORY_RPCS = frozenset({'set_panel_active', 'set_active_app', 'vibe_set_active_app', 'emulation_report_qam'})
 # Preconditions the backend checks before changing anything; the reply already tells the user why.
 _REFUSALS = frozenset({'unsupported_backend', 'unsupported_device', 'preflight_failed', 'no_wifi',
                        'backend_inactive', 'iwd_inactive', 'preference_disabled', 'managed_profile_not_active'})
@@ -1598,17 +1598,5 @@ class Plugin:
     async def emulation_set_default(self, mode, after_qam=False):
         return await self._emulation.set_default(mode, after_qam)
 
-    async def emulation_set_profile(self, app, name, mode, enabled):
-        return await self._emulation.set_profile(app, name, mode, enabled)
-
-    async def emulation_delete_profile(self, app):
-        return await self._emulation.delete_profile(app)
-
-    async def emulation_set_steam_menu(self, enabled):
-        return await self._emulation.set_steam_menu(enabled)
-
-    async def emulation_report_app(self, app, name, qam_open=None):
-        return await self._emulation.report_app(app, name, qam_open)
-
-    async def emulation_test_sticks(self):
-        return await self._emulation.test_sticks()
+    async def emulation_report_qam(self, opened):
+        return await self._emulation.report_qam(opened)

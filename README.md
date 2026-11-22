@@ -32,7 +32,7 @@ same controls are also available as a native [Desktop app](#desktop-app).
 | [Lighting](#lighting) | Set the stick-light effect, colour, brightness and speed, and switch the power-button light |
 | [Button mapping](#button-mapping) | Give the two extra buttons on the left controller your own actions |
 | [Gyro & touchpad](#gyro--touchpad) | Choose which controller's gyro Steam uses, test the gyro and touchpad, and set when the detached controllers turn off |
-| [Controller emulation](#controller-emulation) | Choose the virtual gamepad and switch automatically with per-game profiles |
+| [Controller emulation](#controller-emulation) | Choose the virtual gamepad |
 | [Controller firmware](#controller-firmware) | Update the controllers and their receiver with Lenovo's firmware (experimental) |
 | [Battery](#battery) | Limit charging to about 80% and see the console and both controller batteries |
 | [Display](#display) | Fix the HDR brightness games read |
@@ -471,13 +471,7 @@ elsewhere.
 
 ### Controller emulation
 
-On the Legion Go 2, open **Controller emulation** to choose **Steam Controller**, **Xbox Elite**, **DualSense**, or **DualSense Edge**. **System default** uses the original InputPlumber target. The module shows the live target and which choices your InputPlumber build supports. Changing the gamepad briefly reconnects it. Xbox Elite has no gyro output.
-
-To create a game profile, open the module while the game is running. Select a controller in **Game profiles** and enable **Apply profile automatically**. The default controller returns when you quit the game. If **Steam Controller in Steam menus** is on, Steam Controller returns to the menus instead.
-
-Close Quick Access after selecting a controller to let the switch complete. For Steam remapping, enable PlayStation controller support in Steam's controller settings. The PlayStation section shows whether Steam lists the active controller. **Test PlayStation sticks** compares the Legion Go 2 and virtual DualSense axes over four seconds. Start the game after selecting the controller if the game does not handle controller changes during play. Use the game's Steam Input override when it needs direct PlayStation input.
-
-For **God of War Ragnarök**, Valve's Proton disables direct Sony HID access if the game runs with `SteamDeck=1`. If the analog sticks work in Steam but fail in Ragnarök, close the game and try Proton Experimental with `SteamDeck=0 %command%` as a launch option and Steam Input disabled for Ragnarök. Activate DualSense before launching the game. This retry leaves other games' settings alone. [Valve's Proton change](https://github.com/ValveSoftware/Proton/commit/07a06297a968e6978b7edbec793fb45b5147eeae)
+On the Legion Go 2, open **Controller emulation** to choose **Steam Controller**, **Xbox Elite**, **DualSense**, or **DualSense Edge**. **System default** restores the original InputPlumber target. The chosen controller stays active in Steam and in games. Close Quick Access to complete a change before starting a game.
 
 With DualSense Edge active, Steam Input can map Y1 to left Fn, Y2 to left paddle, Y3 to right Fn and M3 to right paddle. The virtual Edge also reports gyro. Set its motion source in **Gyro & touchpad**.
 

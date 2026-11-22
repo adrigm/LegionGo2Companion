@@ -2,6 +2,11 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.4] - 2026-11-22
+
+- **Controller emulation:** keep one controller selected across Steam menus and games. Remove emulation profiles and the PlayStation diagnostics from Decky and Desktop.
+- **DualSense and Edge:** use the wired controller targets and refresh Steam's discovery once per virtual HID attachment, after Quick Access closes.
+
 ## [2.5.3] - 2026-11-22
 
 - **Quick Access:** put Companion first in the tab list used for directional navigation.

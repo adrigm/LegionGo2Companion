@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import asyncio
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from test_controller_backend import MemorySettings
 
 import controller_backend as backend
 import controller_emulation as emulation
-import emulation_backend as profiles
+import emulation_backend
 
 
 DEVICE = {
@@ -21,19 +23,24 @@ BASE = ["deck-uhid", "mouse", "keyboard", "touchpad"]
 
 
 class TargetTests(unittest.TestCase):
-    def test_stick_reports_use_each_devices_axis_offsets(self):
-        physical = bytearray(64)
-        physical[:3] = b"\x04\x3c\x74"
-        physical[14:18] = b"\x10\x20\x30\x40"
-        usb = bytearray(64)
-        usb[:5] = b"\x01\x10\x20\x30\x40"
-        bluetooth = bytearray(78)
-        bluetooth[:6] = b"\x31\x00\x10\x20\x30\x40"
-        self.assertEqual(backend._physical_sticks(physical), usb[1:5])
-        self.assertEqual(backend._playstation_sticks(usb), usb[1:5])
-        self.assertEqual(backend._playstation_sticks(bluetooth), usb[1:5])
-        self.assertIsNone(backend._playstation_sticks(bluetooth[:-1]))
-        self.assertIsNone(backend._physical_sticks(usb))
+    def test_sony_modes_prefer_usb_with_a_legacy_fallback(self):
+        with patch.object(emulation, "json_value",
+                          return_value=["deck", "ds5", "ds5-edge", "ds5-edge-usb", "ds5-bt"]):
+            self.assertEqual(emulation.modes(DEVICE),
+                             {"steam": "deck", "ds5": "ds5", "ds5-edge": "ds5-edge-usb"})
+
+    def test_steam_discovery_is_scoped_to_the_virtual_sony_hidraw_node(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wired = root / "0003:054C:0CE6.0001/hidraw/hidraw3"
+            wired.mkdir(parents=True)
+            (root / "0003:17EF:61EB.0002/hidraw/hidraw4").mkdir(parents=True)
+            with patch.object(emulation, "UHID_ROOT", root):
+                self.assertEqual(emulation.sony_hidraw("ds5"), wired)
+                self.assertIsNone(emulation.sony_hidraw("ds5-edge"))
+                self.assertIsNone(emulation.sony_hidraw("xbox-elite"))
+                (root / "0005:054C:0CE6.0003/hidraw/hidraw5").mkdir(parents=True)
+                self.assertIsNone(emulation.sony_hidraw("ds5"))
 
     def test_queries_only_the_discovered_service_and_reads_scalar_target_types(self):
         path = "/org/shadowblip/InputPlumber/devices/target/gamepad0"
@@ -164,7 +171,7 @@ class EmulationPreferenceTests(unittest.TestCase):
 
     def test_watch_waits_for_resume_to_settle_and_checks_again(self):
         self.plugin._set_emulation("xbox-elite")
-        watcher = profiles.Plugin(self.plugin)
+        watcher = emulation_backend.Plugin(self.plugin)
         watcher._running = True
         clock = [0.0]
         live_after_tick = {}
@@ -177,8 +184,8 @@ class EmulationPreferenceTests(unittest.TestCase):
             if clock[0] > 18:
                 raise asyncio.CancelledError
 
-        with (patch.object(profiles, "time", types.SimpleNamespace(monotonic=lambda: clock[0])),
-              patch.object(profiles.asyncio, "sleep", side_effect=sleep),
+        with (patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: clock[0])),
+              patch.object(emulation_backend.asyncio, "sleep", side_effect=sleep),
               patch.object(backend.module_runtime, "suspend_offset", side_effect=lambda: 10 if clock[0] else 0),
               patch.object(watcher, "_tick_async", new=AsyncMock(side_effect=watcher._tick))):
             with self.assertRaises(asyncio.CancelledError):
@@ -187,37 +194,54 @@ class EmulationPreferenceTests(unittest.TestCase):
         self.assertEqual(live_after_tick[14], "deck-uhid")
         self.assertEqual(live_after_tick[16], "xbox-elite")
 
-    def test_game_profile_switches_and_restores_the_saved_default(self):
-        self.plugin._set_emulation("xbox-elite")
-        watcher = profiles.Plugin(self.plugin)
+    def test_legacy_profiles_and_menu_override_cannot_replace_the_selected_sony_pad(self):
+        self.plugin._set_emulation("ds5")
+        self.state.data["emulation_options"] = {"steam_menu": True, "profiles": {
+            "200": {"name": "Example", "enabled": True, "mode": "xbox-elite"}
+        }}
+        watcher = emulation_backend.Plugin(self.plugin)
         watcher._running = True
-        watcher._set_profile("200", "Example Game", "ds5-edge", True)
-        with patch.object(watcher, "_app_context", return_value=("200", "Example Game")) as context:
-            watcher._tick(10, False)
-            self.assertEqual(self.live, ["ds5-edge", *BASE[1:]])
-            self.assertEqual(self.state.committed["emulation"]["target"], "xbox-elite")
-            context.return_value = ("", "")
-            watcher._tick(12, False)
-            self.assertEqual(self.live, ["xbox-elite", *BASE[1:]])
-            context.return_value = ("200", "Example Game")
-            watcher._set_profile("200", "Example Game", "ds5-edge", False)
+        watcher._tick(10, False)
+        watcher._tick(12, False)
+        self.assertEqual(self.live[0], "ds5")
+        self.assertNotIn("profiles", watcher._status())
+        self.assertNotIn("steam_menu", watcher._status())
+
+    def test_steam_discovery_runs_only_with_qam_closed_and_once_per_attachment(self):
+        self.plugin._set_emulation("ds5")
+        watcher = emulation_backend.Plugin(self.plugin)
+        watcher._running = True
+        with (patch.object(emulation, "sony_hidraw", return_value=Path("/virtual/0003:054C:0CE6.1/hidraw/hidraw0")) as node,
+              patch.object(emulation, "refresh_steam_detection") as refresh):
+            with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 10)):
+                asyncio.run(watcher.report_qam(True))
+            watcher._tick(11, False)
+            refresh.assert_not_called()
+            with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 12)):
+                asyncio.run(watcher.report_qam(False))
+            watcher._tick(12.5, False)
+            refresh.assert_not_called()
             watcher._tick(14, False)
-            self.assertEqual(self.live, ["xbox-elite", *BASE[1:]])
+            watcher._tick(16, False)
+            refresh.assert_called_once_with(node.return_value)
+            node.return_value = Path("/virtual/0003:054C:0CE6.2/hidraw/hidraw0")
+            watcher._tick(20, True)
+            self.assertEqual(refresh.call_count, 2)
 
     def test_default_change_waits_for_a_fresh_qam_close_even_if_the_ui_stops_reporting(self):
-        watcher = profiles.Plugin(self.plugin)
+        watcher = emulation_backend.Plugin(self.plugin)
         watcher._running = True
-        with patch.object(profiles.time, "monotonic", return_value=10):
+        with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 10)):
             watcher._set_default("ds5", after_qam=True)
         self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
         watcher._tick(40, False)
         self.assertEqual(self.live, BASE)
-        with patch.object(profiles.time, "monotonic", return_value=41):
-            asyncio.run(watcher.report_app("", "", True))
+        with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 41)):
+            asyncio.run(watcher.report_qam(True))
         watcher._tick(42, False)
         self.assertEqual(self.live, BASE)
-        with patch.object(profiles.time, "monotonic", return_value=43):
-            asyncio.run(watcher.report_app("", "", False))
+        with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 43)):
+            asyncio.run(watcher.report_qam(False))
         watcher._tick(43.5, False)
         self.assertEqual(self.live, BASE)
         watcher._tick(45, False)
