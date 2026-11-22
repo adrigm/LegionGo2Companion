@@ -115,6 +115,23 @@ class TargetTests(unittest.TestCase):
                 emulation.recover(DEVICE, current, BASE, "xbox-elite", "deck-uhid")
         self.assertCountEqual(write.call_args.args[1], BASE)
 
+    def test_failed_menu_replug_falls_back_to_the_original_gamepad(self):
+        selected = ["ds5", *BASE[1:]]
+        live = selected.copy()
+        writes = []
+        def apply(device, kinds):
+            writes.append(kinds)
+            if kinds != selected:  # Simulate a Sony attachment refused after the unplug.
+                live[:] = kinds
+        with (patch.object(emulation, "targets", side_effect=lambda _: live.copy()),
+              patch.object(emulation, "_set_targets", side_effect=apply),
+              patch.object(emulation, "TARGET_SETTLE_SECONDS", 0),
+              patch.object(emulation.time, "sleep")):
+            with self.assertRaises(emulation.InputPlumberError):
+                emulation.reconnect(DEVICE, selected, BASE[0])
+        self.assertEqual(writes, [BASE[1:], selected, BASE])
+        self.assertEqual(live, BASE)
+
 
 class EmulationPreferenceTests(unittest.TestCase):
     def setUp(self):
@@ -230,6 +247,53 @@ class EmulationPreferenceTests(unittest.TestCase):
             self.assertEqual(refresh.call_count, 2)
             refresh.assert_called_with(nodes, reconnect=True)
             switch.assert_not_called()
+
+    def test_steam_empty_after_exit_requires_a_real_unplug_and_replug(self):
+        self.plugin._set_emulation("ds5")
+        selected = self.live.copy()
+        checks, writes = [], []
+        watcher = emulation_backend.Plugin(self.plugin, lambda: checks.append(True))
+        watcher._running = True
+        def apply(device, kinds):
+            writes.append(kinds)
+            self.live[:] = kinds
+        def sample(now, game, connected, qam=False):
+            clock.monotonic = lambda: now
+            asyncio.run(watcher.report_qam(qam, game, connected))
+            watcher._tick(now, False)
+        clock = types.SimpleNamespace(monotonic=lambda: 0)
+        with (patch.object(emulation_backend, "time", clock),
+              patch.object(emulation, "_set_targets", side_effect=apply),
+              patch.object(emulation.time, "sleep"), patch.object(emulation, "refresh_steam_detection")):
+            sample(1, True, None)
+            sample(4, False, False)
+            sample(7, False, True)  # A transient empty report is harmless.
+            sample(10, False, False)
+            sample(13, False, False)
+            sample(16, False, False, qam=True)
+            sample(19, False, False)
+            self.assertEqual(writes, [])
+            sample(22, False, False)
+            self.assertEqual(writes, [BASE[1:], selected])
+            self.assertEqual(checks, [True])
+            for now in range(25, 100, 3):
+                sample(now, False, False)
+            self.assertEqual(len(writes), 2)
+            sample(101, False, True)
+            self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
+
+    def test_stale_or_unavailable_steam_roster_cannot_disconnect_a_pad(self):
+        self.plugin._set_emulation("xbox-elite")
+        watcher = emulation_backend.Plugin(self.plugin)
+        watcher._running = True
+        with (patch.object(emulation, "reconnect") as reconnect,
+              patch.object(emulation_backend, "time") as clock):
+            for now, game, connected in [(1, False, False), (15, False, False), (19, None, False),
+                                         (23, False, None), (26, False, False), (33, True, False)]:
+                clock.monotonic.return_value = now
+                asyncio.run(watcher.report_qam(False, game, connected))
+                watcher._tick(now, False)
+            reconnect.assert_not_called()
 
     def test_watch_waits_for_resume_to_settle_and_checks_again(self):
         self.plugin._set_emulation("xbox-elite")

@@ -784,6 +784,23 @@ class Plugin:
             self._emulation_retry_at = 0.0
             return target if apply else None
 
+    def _reconnect_emulation(self, target, still_missing):
+        with self._operation:
+            with self._capture_lock:
+                if self._capture and self._capture["active"]:
+                    return False
+            saved = _emulation_choice()
+            if not saved or saved["target"] != target:
+                return False
+            device = self._emulation_device()
+            if self._emulation_owner != (device["generation"], device["path"]):
+                return False
+            current = controller_emulation.targets(device)
+            if controller_emulation.gamepad(current, allow_missing=True) != target or not still_missing():
+                return False
+            controller_emulation.reconnect(device, current, saved["baseline"])
+            return True
+
     def _sync_emulation(self, *, release=False, now=None, resumed=False, game_exited=False) -> str | None:
         with self._operation:
             saved = _emulation_choice()

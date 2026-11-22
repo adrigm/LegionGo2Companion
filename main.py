@@ -451,7 +451,11 @@ class Plugin:
         self._remap = remap_backend.Plugin()
         self._battery = battery_backend.Plugin()
         self._controller = controller_backend.Plugin()
-        self._emulation = emulation_backend.Plugin(self._controller)
+        self._emulation = emulation_backend.Plugin(self._controller, self._check_lost_gamepad)
+
+    def _check_lost_gamepad(self):
+        if self._inputplumber_recovery is not None:
+            self._inputplumber_recovery.request_check()
 
     def _ensure_updates(self):
         if self._updates is not None:
@@ -1598,5 +1602,5 @@ class Plugin:
     async def emulation_set_default(self, mode, after_qam=False):
         return await self._emulation.set_default(mode, after_qam)
 
-    async def emulation_report_qam(self, opened, game_running=None):
-        return await self._emulation.report_qam(opened, game_running)
+    async def emulation_report_qam(self, opened, game_running=None, connected=None):
+        return await self._emulation.report_qam(opened, game_running, connected)

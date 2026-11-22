@@ -222,6 +222,10 @@ class LostControllerRecovery:
         """Restarts requested since this Companion start (the device report shows it)."""
         return len(self._restarts)
 
+    def request_check(self) -> None:
+        """Queue the existing settled check on the event loop."""
+        self._wake.set()
+
     def _drain(self, monitor) -> None:
         try:
             for device in iter(lambda: monitor.poll(0), None):

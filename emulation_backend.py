@@ -17,6 +17,8 @@ CHECK_SECONDS = 2.0
 QAM_LEASE_SECONDS = 12.0
 QAM_SETTLE_SECONDS = 1.0
 QAM_SELECTION_GRACE_SECONDS = 4.0
+STEAM_EMPTY_SECONDS = 6.0
+RECONNECT_COOLDOWN = 60.0
 
 
 def _mode(value):
@@ -26,8 +28,9 @@ def _mode(value):
 
 
 class Plugin:
-    def __init__(self, controller):
+    def __init__(self, controller, check_lost_gamepad=None):
         self._controller = controller
+        self._check_lost_gamepad = check_lost_gamepad
         self._task = None
         self._running = False
         self._qam_open = False
@@ -42,6 +45,11 @@ class Plugin:
         self._last_exit = None
         self._handled_exit = None
         self._menu_add_pending = False
+        self._empty_since = None
+        self._empty_checked = False
+        self._reconnected_loss = None
+        self._reconnected_at = float("-inf")
+        self._awaiting_steam = False
 
     @staticmethod
     def applicable():
@@ -78,10 +86,15 @@ class Plugin:
         await _offload(self._set_default, _mode(mode), after_qam)
         return await self.get_status()
 
-    async def report_qam(self, opened, game_running=None):
-        if type(opened) is not bool or (game_running is not None and type(game_running) is not bool):
+    async def report_qam(self, opened, game_running=None, connected=None):
+        if type(opened) is not bool or any(v is not None and type(v) is not bool for v in (game_running, connected)):
             raise ValueError("Invalid Quick Access state.")
         now = time.monotonic()
+        if game_running is not False or connected is not False or now - self._qam_seen_at >= QAM_LEASE_SECONDS:
+            self._empty_since = None
+            self._empty_checked = False
+        if game_running is False and connected is False and self._empty_since is None:
+            self._empty_since = now
         if game_running is not None:
             if self._game_running and not game_running:
                 self._last_exit = now
@@ -92,7 +105,40 @@ class Plugin:
             self._qam_closed_at = now
         self._qam_open = opened
         self._qam_seen_at = now
+        if self._confirmed_empty(now) and not self._empty_checked:
+            self._empty_checked = True
+            event("emulation", "steam_menu_no_controller")
+            if self._check_lost_gamepad:
+                self._check_lost_gamepad()
+        if self._awaiting_steam and game_running is False and connected is not None:
+            if connected or now - self._reconnected_at >= QAM_LEASE_SECONDS:
+                self._awaiting_steam = False
+                event("emulation", "steam_menu_reconnect_result", outcome="visible" if connected else "still_missing")
         return {}
+
+    def _confirmed_empty(self, now):
+        # Two or more fresh Steam reports spanning the grace period. An unavailable
+        # roster or a suspended frontend cannot authorize a disconnect.
+        return (self._empty_since is not None and self._qam_seen_at - self._empty_since >= STEAM_EMPTY_SECONDS
+                and 0 <= now - self._qam_seen_at < QAM_LEASE_SECONDS and not self._qam_blocks_switch(now))
+
+    def _recover_empty_menu(self, target, now):
+        loss = self._empty_since
+        if (not target or not self._confirmed_empty(now) or loss == self._reconnected_loss
+                or now - self._reconnected_at < RECONNECT_COOLDOWN):
+            return
+        def still_missing():
+            return self._running and self._empty_since == loss and self._confirmed_empty(time.monotonic())
+        try:
+            if not self._controller._reconnect_emulation(target, still_missing):
+                return
+        except (controller_backend.ControllerError, controller_emulation.InputPlumberError) as exc:
+            event("emulation", "steam_menu_reconnect_failed", level="warning", mode=target, error=exc)
+        else:
+            event("emulation", "steam_menu_reconnected", mode=target)
+        self._reconnected_loss = loss
+        self._reconnected_at = time.monotonic()
+        self._awaiting_steam = True
 
     def _refresh_steam(self, target, now, resumed):
         nodes = controller_emulation.sony_discovery_nodes(target)
@@ -133,6 +179,7 @@ class Plugin:
             if target and controller_emulation.GAMEPADS.get(target) not in controller_emulation.SONY_PRODUCTS:
                 self._menu_add_pending = False
             self._refresh_steam(target, now, resumed)
+            self._recover_empty_menu(target, now)
             return True
 
     @module_runtime.controller_operation("emulation")
@@ -179,4 +226,7 @@ class Plugin:
         self._last_exit = self._handled_exit = None
         self._menu_add_pending = False
         self._discovery_reconnect = False
+        self._empty_since = self._reconnected_loss = None
+        self._empty_checked = self._awaiting_steam = False
+        self._reconnected_at = float("-inf")
         await _offload(self._controller._sync_emulation, release=True)

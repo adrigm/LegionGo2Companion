@@ -25,18 +25,27 @@ run(async () => {
   assert.doesNotMatch(text(h.render()), /Game profiles|Steam Controller in Steam menus|Test PlayStation sticks|SteamDeck=0/);
   h.unmount();
 
-  const router = { MainRunningApp: null };
-  const lifecycle = mount('emulation.tsx', { ui: { Router: router } });
+  let inGame = false, roster = [{}];
+  const router = { IsAnyAppRunning: () => inGame };
+  const store = { GetControllers: () => roster, GetController() {} };
+  const lifecycle = mount('emulation.tsx', { ui: {
+    Router: router, findModuleExport: predicate => predicate(store) ? store : undefined,
+  } });
   const stop = lifecycle.exports.startEmulationWatcher();
   await settle();
-  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false]);
-  router.MainRunningApp = { appid: 2322010 };
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false, true]);
+  inGame = true;
   lifecycle.fire('interval');
   await settle();
-  assert.deepEqual(lifecycle.calls.at(-1).args, [false, true]);
-  router.MainRunningApp = null;
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, true, null]);
+  inGame = false;
+  roster = [];
   lifecycle.fire('interval');
   await settle();
-  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false]);
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false, false]);
+  roster = undefined;
+  lifecycle.fire('interval');
+  await settle();
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false, null]);
   stop();
 });

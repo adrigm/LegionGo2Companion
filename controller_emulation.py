@@ -127,6 +127,16 @@ def switch(device: dict, current: list[str], target: str) -> None:
     _change_targets(device, current, expected, current)
 
 
+def reconnect(device: dict, current: list[str], baseline: str) -> None:
+    """Give Steam a kernel unplug and plug for the gamepad on this composite."""
+    pad = gamepad(current)
+    auxiliary = [kind for kind in current if kind != pad]
+    _change_targets(device, current, auxiliary, current)
+    # InputPlumber also allows the stopped device to disappear on suspend.
+    time.sleep(0.25)
+    _change_targets(device, auxiliary, current, [baseline, *auxiliary])
+
+
 def recover(device: dict, current: list[str], confirmed: list[str], target: str, baseline: str) -> None:
     """Reattach a missing target using this composite's last confirmed auxiliary devices."""
     if gamepad(current, allow_missing=True) is not None:

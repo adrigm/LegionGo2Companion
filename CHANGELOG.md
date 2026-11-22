@@ -2,6 +2,11 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.7] - 2026-11-22
+
+- Read Steam's connected controller list in the menu. If it stays empty after leaving a game, unplug and reconnect the selected virtual gamepad on the Legion composite. Keep its auxiliary devices attached and check whether Steam sees a controller again.
+- An empty Steam controller list also wakes the existing recovery check for a missing InputPlumber composite.
+
 ## [2.5.6] - 2026-11-22
 
 - When a game closes, announce the selected virtual DualSense or DualSense Edge to Steam again after Quick Access closes. If InputPlumber recreates the Legion controller without a gamepad, restore the saved selection and keep the new composite's auxiliary devices.

@@ -47,6 +47,9 @@ declare const appStore: {
 };
 
 declare const SteamClient: {
+  Input?: {
+    RegisterForControllerListChanges?(callback: (controllers: unknown[]) => void): SteamUnregister;
+  };
   URL: { ExecuteSteamURL(url: string): void };
   Apps: {
     RegisterForAppDetails(appid: number, callback: (details: SteamAppDetails) => void): SteamUnregister;
