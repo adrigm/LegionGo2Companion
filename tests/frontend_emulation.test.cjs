@@ -1,4 +1,4 @@
-const { assert, mount, run, settle, label, text } = require('./legion_harness.cjs');
+const { assert, mount, run, settle, label, text, button } = require('./legion_harness.cjs');
 
 run(async () => {
   let steamList;
@@ -15,6 +15,11 @@ run(async () => {
   await settle();
   const picker = () => label(h.render(), 'Default controller');
   assert.deepEqual([...picker().props.rgOptions].map(option => option.data), ['system', 'steam', 'xbox-elite', 'ds5', 'ds5-edge']);
+  picker().props.onChange({ data: 'ds5' });
+  assert.deepEqual(h.calls.at(-1).args, ['ds5', true]);
+  h.respond('emulation_set_default', { ...state, selected: 'ds5', effective: 'ds5', waiting_for_qam: true });
+  await settle();
+  assert.match(text(h.render()), /Controller change pending/);
   label(h.render(), 'Controller for this game').props.onChange({ data: 'ds5-edge' });
   assert.deepEqual(h.calls.at(-1).args, ['200', 'Example Game', 'ds5-edge', false]);
   const profile = { mode: 'ds5-edge', enabled: false, name: 'Example Game' };
@@ -31,6 +36,11 @@ run(async () => {
   steamList([{ unVendorID: 0x054c, unProductID: 0x0df2 }]);
   assert.match(text(h.render()), /Steam reports a matching PlayStation controller/);
   assert.match(text(h.render()), /Y1 → left Fn/);
+  button(h.render(), 'Test PlayStation sticks').props.onClick();
+  h.respond('emulation_test_sticks', { mode: 'ds5-edge', physical: { reports: 12, span: [150, 150, 150, 150] },
+    virtual: { reports: 12, span: [0, 0, 0, 0] } });
+  await settle();
+  assert.match(text(h.render()), /did not reach the virtual DualSense/);
   h.unmount();
   assert.equal(steamList, undefined);
 });

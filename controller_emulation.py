@@ -4,12 +4,8 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 from collections import Counter
-from pathlib import Path
-
-from dk_process import run
 
 from inputplumber_process import INTERFACE, InputPlumberError, json_value, run_busctl
 
@@ -24,6 +20,7 @@ TARGET_INTERFACE = "org.shadowblip.Input.Target"
 TARGET_PATH = re.compile(r"/org/shadowblip/InputPlumber/devices/target/[A-Za-z0-9_]+")
 OWNER = re.compile(r":[0-9]+\.[0-9]+")
 SONY_PRODUCTS = {"ds5": "0CE6", "ds5-edge": "0DF2"}
+TARGET_SETTLE_SECONDS = 7.0
 
 
 def _strings(value):
@@ -71,7 +68,7 @@ def _set_targets(device: dict, kinds: list[str]) -> None:
 
 def _wait_for(device: dict, expected: list[str]) -> bool:
     # SetTargetDevices queues the change. The gamepad and its D-Bus interface appear later.
-    until = time.monotonic() + 2.0
+    until = time.monotonic() + TARGET_SETTLE_SECONDS
     while True:
         try:
             if sorted(targets(device)) == sorted(expected):
@@ -80,7 +77,7 @@ def _wait_for(device: dict, expected: list[str]) -> bool:
             pass
         if time.monotonic() >= until:
             return False
-        time.sleep(0.10)
+        time.sleep(0.25)
 
 
 def switch(device: dict, current: list[str], target: str) -> None:
@@ -98,30 +95,6 @@ def recover(device: dict, current: list[str], confirmed: list[str], target: str,
     previous = gamepad(confirmed)
     auxiliary = list((Counter(current) | Counter(kind for kind in confirmed if kind != previous)).elements())
     _change_targets(device, current, [target, *auxiliary], [baseline, *auxiliary])
-
-
-def refresh_steam_detection(mode: str) -> None:
-    """Replay udev discovery for the virtual Sony pad so existing Steam rules can run."""
-    product = SONY_PRODUCTS.get(mode)
-    if product is None:
-        raise InputPlumberError("Select DualSense or DualSense Edge first.")
-    pattern = re.compile(rf"000[35]:054C:{product}\.[0-9A-F]+", re.IGNORECASE)
-    root = Path("/sys/devices/virtual/misc/uhid")
-    devices = [entry for entry in root.glob("*") if pattern.fullmatch(entry.name) and entry.is_dir()]
-    if len(devices) != 1:
-        raise InputPlumberError("A single virtual PlayStation gamepad could not be identified.")
-    device = devices[0]
-    nodes = [path for path in device.glob("hidraw/hidraw*") if re.fullmatch(r"hidraw[0-9]+", path.name)]
-    nodes += [path for path in device.glob("input/input*/event*") if re.fullmatch(r"event[0-9]+", path.name)]
-    if not nodes:
-        raise InputPlumberError("The virtual gamepad has no controller nodes yet. Try again.")
-    try:
-        result = run(["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)],
-                     5.0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise InputPlumberError("Could not refresh Steam controller discovery.") from exc
-    if result.returncode:
-        raise InputPlumberError("Could not refresh Steam controller discovery.")
 
 
 def _change_targets(device: dict, current: list[str], expected: list[str], fallback: list[str]) -> None:

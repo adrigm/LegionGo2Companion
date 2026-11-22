@@ -21,6 +21,20 @@ BASE = ["deck-uhid", "mouse", "keyboard", "touchpad"]
 
 
 class TargetTests(unittest.TestCase):
+    def test_stick_reports_use_each_devices_axis_offsets(self):
+        physical = bytearray(64)
+        physical[:3] = b"\x04\x3c\x74"
+        physical[14:18] = b"\x10\x20\x30\x40"
+        usb = bytearray(64)
+        usb[:5] = b"\x01\x10\x20\x30\x40"
+        bluetooth = bytearray(78)
+        bluetooth[:6] = b"\x31\x00\x10\x20\x30\x40"
+        self.assertEqual(backend._physical_sticks(physical), usb[1:5])
+        self.assertEqual(backend._playstation_sticks(usb), usb[1:5])
+        self.assertEqual(backend._playstation_sticks(bluetooth), usb[1:5])
+        self.assertIsNone(backend._playstation_sticks(bluetooth[:-1]))
+        self.assertIsNone(backend._physical_sticks(usb))
+
     def test_queries_only_the_discovered_service_and_reads_scalar_target_types(self):
         path = "/org/shadowblip/InputPlumber/devices/target/gamepad0"
         with patch.object(emulation, "json_value", side_effect=[[path], "deck-uhid"]) as dbus:
@@ -189,6 +203,26 @@ class EmulationPreferenceTests(unittest.TestCase):
             watcher._set_profile("200", "Example Game", "ds5-edge", False)
             watcher._tick(14, False)
             self.assertEqual(self.live, ["xbox-elite", *BASE[1:]])
+
+    def test_default_change_waits_for_a_fresh_qam_close_even_if_the_ui_stops_reporting(self):
+        watcher = profiles.Plugin(self.plugin)
+        watcher._running = True
+        with patch.object(profiles.time, "monotonic", return_value=10):
+            watcher._set_default("ds5", after_qam=True)
+        self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
+        watcher._tick(40, False)
+        self.assertEqual(self.live, BASE)
+        with patch.object(profiles.time, "monotonic", return_value=41):
+            asyncio.run(watcher.report_app("", "", True))
+        watcher._tick(42, False)
+        self.assertEqual(self.live, BASE)
+        with patch.object(profiles.time, "monotonic", return_value=43):
+            asyncio.run(watcher.report_app("", "", False))
+        watcher._tick(43.5, False)
+        self.assertEqual(self.live, BASE)
+        watcher._tick(45, False)
+        watcher._tick(47, False)
+        self.assertEqual(self.live, ["ds5", *BASE[1:]])
 
     def test_switch_during_diagnostics_does_not_change_the_gamepad(self):
         self.plugin._capture = {"active": True}

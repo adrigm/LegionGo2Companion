@@ -20,7 +20,7 @@ import { RgbPage, rgbSummary } from "./rgb";
 import { RemapPage, remapSummary } from "./remap";
 import { BatteryPage, batterySummary } from "./battery";
 import { ControllerPage, controllerSummary } from "./controller";
-import { EmulationPage, startEmulationWatcher } from "./emulation";
+import { EmulationPage, startEmulationWatcher, useEmulationQamVisibility } from "./emulation";
 import { createQamShortcut, QamShortcutSetting } from "./qam";
 import { DeviceReportSection } from "./report";
 import { AboutPage, UpdateController, type UpdateCheck, type UpdateDownload } from "./about";
@@ -301,6 +301,7 @@ const Controls: FC<{modules?: ModuleStates; device?: Device; home?: string}> = (
 
 const Content: FC = () => {
   const visible = useQuickAccessVisible();
+  useEmulationQamVisibility(visible);
   const [status, setStatus] = useState<GuardStatus | null>(guardStatus);
   useEffect(() => {
     guardListeners.add(setStatus);

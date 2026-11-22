@@ -19,6 +19,14 @@ export const emulationOptions = (status, saved) => Object.keys(EMULATION_LABELS)
   .filter(id => id === "system" || id === saved || status?.options?.includes(id))
   .map(id => ({ id, label: EMULATION_LABELS[id] }));
 export const isPlayStation = mode => mode === "ds5" || mode === "ds5-edge";
+export const stickTestText = sample => sample?.span?.length === 4
+  ? `Left X/Y ${sample.span[0]}/${sample.span[1]} · Right X/Y ${sample.span[2]}/${sample.span[3]} (of 255)`
+  : "No input reports received.";
+export function stickTestSummary(test) {
+  if (!test.physical.span?.every(value => value >= 16)) return "Move each stick fully in both directions and try again.";
+  if (!test.virtual.span?.every(value => value >= 16)) return "The Legion sticks moved, but one or more axes did not reach the virtual DualSense.";
+  return "All four axes reached the virtual controller. If they fail in a game, check that game's Steam Input layout and restart it with this controller active.";
+}
 export const EDGE_BUTTONS = "Y1 → left Fn, Y2 → left paddle, Y3 → right Fn, M3 → right paddle.";
 export const emulationNote = status => {
   const { active, effective, reason } = status || {};

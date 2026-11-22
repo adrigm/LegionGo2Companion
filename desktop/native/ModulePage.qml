@@ -451,8 +451,12 @@ RowLayout {
                     {available:()=>!!emulation().active,note:"Used when the running game has no enabled profile."}),
                 switcher("Steam Controller in Steam menus",()=>emulation().steam_menu,"emulation_set_steam_menu",null,
                     {available:()=>!!emulation().steam_menu || !!emulation().options?.includes("steam")}),
-                switcher("Refresh PlayStation detection in Steam",()=>emulation().steam_discovery,"emulation_set_steam_discovery"),
-                action("Refresh Steam detection","emulation_refresh_steam_detection",null,{visible:()=>Gyro.isPlayStation(emulation().active)}),
+                action("Test PlayStation sticks","emulation_test_sticks",null,{visible:()=>Gyro.isPlayStation(emulation().active),
+                    note:"Move both sticks through their full range for four seconds."}),
+                text("Legion Go 2 sticks",()=>Gyro.stickTestText(s("emulation_test_sticks").physical),
+                    {visible:()=>Gyro.isPlayStation(emulation().active) && s("emulation_test_sticks").mode===emulation().active}),
+                text("Virtual DualSense sticks",()=>Gyro.stickTestText(s("emulation_test_sticks").virtual),
+                    {visible:()=>Gyro.isPlayStation(emulation().active) && s("emulation_test_sticks").mode===emulation().active}),
                 text("DualSense Edge",()=>Gyro.EDGE_BUTTONS,{visible:()=>emulation().active==="ds5-edge" || emulation().effective==="ds5-edge",
                     note:"Gyroscope is available to Steam Input and games."})
             ]},{title:"Game profiles",fields:[

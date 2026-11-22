@@ -16,6 +16,9 @@ _offload = functools.partial(module_runtime.offload, "emulation")
 MODES = {"system", *controller_emulation.MODES}
 PROFILE_LIMIT = 100
 CHECK_SECONDS = 2.0
+QAM_LEASE_SECONDS = 12.0
+QAM_SETTLE_SECONDS = 1.0
+QAM_SELECTION_GRACE_SECONDS = 4.0
 
 
 def _mode(value):
@@ -46,8 +49,7 @@ def _options():
             name = value.get("name")
             clean[app] = {"mode": value["mode"], "enabled": value["enabled"],
                           "name": name[:120] if isinstance(name, str) and name else app}
-    return {"steam_menu": raw.get("steam_menu") is True, "steam_discovery": raw.get("steam_discovery") is True,
-            "profiles": clean}
+    return {"steam_menu": raw.get("steam_menu") is True, "profiles": clean}
 
 
 class Plugin:
@@ -58,7 +60,11 @@ class Plugin:
         self._app_name = ""
         self._reported_at = None
         self._running = False
-        self._discovered = None
+        self._qam_open = False
+        self._qam_seen_at = float("-inf")
+        self._qam_closed_at = float("-inf")
+        self._defer_until = 0.0
+        self._deferred_at = None
 
     @staticmethod
     def applicable():
@@ -76,6 +82,11 @@ class Plugin:
             return profile["mode"]
         return "steam" if not app and options["steam_menu"] else None
 
+    def _qam_blocks_switch(self, now):
+        waiting_for_close = self._deferred_at is not None and (self._qam_open or self._qam_seen_at < self._deferred_at)
+        return (waiting_for_close or now < self._defer_until or now - self._qam_closed_at < QAM_SETTLE_SECONDS
+                or (self._qam_open and now - self._qam_seen_at < QAM_LEASE_SECONDS))
+
     def _status(self):
         with self._controller._operation:
             options = _options()
@@ -85,20 +96,26 @@ class Plugin:
                 "selected": "system", "active": None, "options": [], "reason": "Requires Legion Go 2."
             }
             return {**status, **options, "running_app": app, "running_name": name,
+                    "waiting_for_qam": self._qam_blocks_switch(time.monotonic()),
                     "effective": mode if mode is not None else status["selected"]}
 
     async def get_status(self):
         return await _offload(self._status)
 
-    def _set_default(self, mode):
+    def _set_default(self, mode, after_qam):
         with self._controller._operation:
-            options = _options()
-            target = self._controller._set_emulation(mode, apply=self._override(options) is None)
-            if target:
-                self._discover(target, options["steam_discovery"], force=True)
+            now = time.monotonic()
+            apply = not after_qam and not self._qam_blocks_switch(now) and self._override(_options()) is None
+            self._controller._set_emulation(mode, apply=apply)
+            if after_qam:
+                # Native dropdowns temporarily report QAM as hidden while committing a selection.
+                self._defer_until = now + QAM_SELECTION_GRACE_SECONDS
+                self._deferred_at = now
 
-    async def set_default(self, mode):
-        await _offload(self._set_default, _mode(mode))
+    async def set_default(self, mode, after_qam=False):
+        if type(after_qam) is not bool:
+            raise ValueError("Invalid controller switch timing.")
+        await _offload(self._set_default, _mode(mode), after_qam)
         return await self.get_status()
 
     def _set_profile(self, app, name, mode, enabled):
@@ -125,69 +142,54 @@ class Plugin:
         await _offload(self._delete_profile, _app(app))
         return await self.get_status()
 
-    def _set_option(self, key, enabled):
+    def _set_steam_menu(self, enabled):
         with self._controller._operation:
             options = _options()
-            options[key] = enabled
+            options["steam_menu"] = enabled
             controller_backend._save(options, "emulation_options")
-            if key == "steam_discovery":
-                self._discovered = None
 
     async def set_steam_menu(self, enabled):
         if type(enabled) is not bool:
             raise ValueError("Invalid Steam menu setting.")
-        await _offload(self._set_option, "steam_menu", enabled)
+        await _offload(self._set_steam_menu, enabled)
         return await self.get_status()
 
-    async def set_steam_discovery(self, enabled):
-        if type(enabled) is not bool:
-            raise ValueError("Invalid Steam detection setting.")
-        await _offload(self._set_option, "steam_discovery", enabled)
-        return await self.get_status()
-
-    async def report_app(self, app, name):
-        if not isinstance(name, str):
-            raise ValueError("Invalid game name.")
+    async def report_app(self, app, name, qam_open=None):
+        if not isinstance(name, str) or (qam_open is not None and type(qam_open) is not bool):
+            raise ValueError("Invalid game or Quick Access state.")
         self._app_id = _app(app, allow_empty=True)
         self._app_name = name[:120]
-        self._reported_at = time.monotonic()
+        now = time.monotonic()
+        self._reported_at = now
+        if qam_open is not None:
+            if not qam_open and self._qam_open:
+                self._qam_closed_at = now
+            self._qam_open = qam_open
+            self._qam_seen_at = now
         return {}
 
-    def _refresh_steam_detection(self):
+    def _test_sticks(self):
         with self._controller._operation:
             device = self._controller._emulation_device()
             active = controller_emulation.gamepad(controller_emulation.targets(device))
-            controller_emulation.refresh_steam_detection(controller_emulation.GAMEPADS[active])
+            return controller_backend.test_playstation_sticks(controller_emulation.GAMEPADS[active])
 
-    async def refresh_steam_detection(self):
-        await _offload(self._refresh_steam_detection)
-        return await self.get_status()
-
-    def _discover(self, target, enabled, *, force=False):
-        if not target:
-            self._discovered = None
-            return
-        if not enabled or (not force and target == self._discovered):
-            return
-        self._discovered = target
-        if target in controller_emulation.SONY_PRODUCTS:
-            try:
-                controller_emulation.refresh_steam_detection(target)
-            except controller_emulation.InputPlumberError as exc:
-                event("emulation", "steam_detection_refresh_failed", level="warning", error=exc, repeat=60)
+    async def test_sticks(self):
+        return await _offload(self._test_sticks)
 
     def _tick(self, now, resumed):
         with self._controller._operation:
-            if not self._running:
+            if not self._running or self._qam_blocks_switch(now):
                 return
+            self._deferred_at = None
             options = _options()
             override = self._override(options) if options["profiles"] or options["steam_menu"] else None
-            target = self._controller._sync_emulation(now=now, resumed=resumed, override=override)
-            self._discover(target, options["steam_discovery"], force=resumed)
+            self._controller._sync_emulation(now=now, resumed=resumed, override=override)
+            return True
 
     @module_runtime.controller_operation("emulation")
     async def _tick_async(self, now, resumed):
-        await _offload(self._tick, now, resumed)
+        return await _offload(self._tick, now, resumed)
 
     async def _watch(self):
         resume = module_runtime.ResumeWatch()
@@ -201,8 +203,8 @@ class Plugin:
             if settle_until is not None and now < settle_until:
                 continue
             try:
-                await self._tick_async(now, settle_until is not None)
-                settle_until = None
+                if await self._tick_async(now, settle_until is not None):
+                    settle_until = None
             except module_runtime.ControllerPaused:
                 continue
             except Exception as exc:
@@ -216,7 +218,10 @@ class Plugin:
         self._running = False
         self._app_id = self._app_name = ""
         self._reported_at = None
-        self._discovered = None
+        self._qam_open = False
+        self._qam_seen_at = self._qam_closed_at = float("-inf")
+        self._defer_until = 0.0
+        self._deferred_at = None
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)

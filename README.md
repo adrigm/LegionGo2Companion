@@ -475,7 +475,7 @@ On the Legion Go 2, open **Controller emulation** to choose **Steam Controller**
 
 To create a game profile, open the module while the game is running. Select a controller in **Game profiles** and enable **Apply profile automatically**. The default controller returns when you quit the game. If **Steam Controller in Steam menus** is on, Steam Controller returns to the menus instead.
 
-For Steam remapping, enable PlayStation controller support in Steam's controller settings. **Refresh PlayStation detection in Steam** refreshes discovery for the virtual Sony controller on mode changes and resume. The manual refresh and the Steam controller-list status are available in the PlayStation section. Use the game's Steam Input override when it needs direct PlayStation input.
+Close Quick Access after selecting a controller to let the switch complete. For Steam remapping, enable PlayStation controller support in Steam's controller settings. The PlayStation section shows whether Steam lists the active controller. **Test PlayStation sticks** compares the Legion Go 2 and virtual DualSense axes over four seconds. Start the game after selecting the controller if the game does not handle controller changes during play. Use the game's Steam Input override when it needs direct PlayStation input.
 
 With DualSense Edge active, Steam Input can map Y1 to left Fn, Y2 to left paddle, Y3 to right Fn and M3 to right paddle. The virtual Edge also reports gyro. Set its motion source in **Gyro & touchpad**.
 

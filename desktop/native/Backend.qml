@@ -196,7 +196,7 @@ QtObject {
                 let key = method;
                 if (method.startsWith("fan_")) key = "fan_get_state";
                 else if (method.startsWith("firmware_")) key = "firmware_get_status";
-                else if (method.startsWith("emulation_")) key = "emulation_get_status";
+                else if (method.startsWith("emulation_") && method!=="emulation_test_sticks") key = "emulation_get_status";
                 if(method.startsWith("firmware_")) {
                     if(request.mutation)backend.firmwareStepError="";
                     const errors=Object.assign({},backend.readErrors);errors.firmware_get_status="";backend.readErrors=errors;

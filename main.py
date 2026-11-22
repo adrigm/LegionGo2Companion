@@ -1595,8 +1595,8 @@ class Plugin:
     async def emulation_get_status(self):
         return await self._emulation.get_status()
 
-    async def emulation_set_default(self, mode):
-        return await self._emulation.set_default(mode)
+    async def emulation_set_default(self, mode, after_qam=False):
+        return await self._emulation.set_default(mode, after_qam)
 
     async def emulation_set_profile(self, app, name, mode, enabled):
         return await self._emulation.set_profile(app, name, mode, enabled)
@@ -1607,11 +1607,8 @@ class Plugin:
     async def emulation_set_steam_menu(self, enabled):
         return await self._emulation.set_steam_menu(enabled)
 
-    async def emulation_set_steam_discovery(self, enabled):
-        return await self._emulation.set_steam_discovery(enabled)
+    async def emulation_report_app(self, app, name, qam_open=None):
+        return await self._emulation.report_app(app, name, qam_open)
 
-    async def emulation_report_app(self, app, name):
-        return await self._emulation.report_app(app, name)
-
-    async def emulation_refresh_steam_detection(self):
-        return await self._emulation.refresh_steam_detection()
+    async def emulation_test_sticks(self):
+        return await self._emulation.test_sticks()

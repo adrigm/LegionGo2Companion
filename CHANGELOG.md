@@ -2,6 +2,12 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.2] - 2026-11-22
+
+- **Controller emulation:** defer changes until Quick Access closes and allow InputPlumber more time to attach its targets. Steam observes the normal device connection events.
+- **DualSense and Edge:** add a read-only test of both sticks on the physical Legion controllers and on the virtual PlayStation controller.
+- **Quick Access:** place the Companion button visually first while preserving Steam's native tab indices.
+
 ## [2.5.1] - 2026-11-22
 
 - **Quick Access:** place Companion at the top of Steam's Quick Access Menu and use a 24 px icon there.

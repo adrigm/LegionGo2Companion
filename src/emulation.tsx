@@ -1,40 +1,64 @@
 // SPDX-License-Identifier: BSD-3-Clause
 import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow, ToggleField } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
-import { EDGE_BUTTONS, EMULATION_LABELS, emulationNote, emulationOptions, isPlayStation,
-  type EmulationMode, type EmulationStatus } from "../desktop/native/controller.mjs";
+import { EDGE_BUTTONS, EMULATION_LABELS, emulationNote, emulationOptions, isPlayStation, stickTestSummary, stickTestText,
+  type EmulationMode, type EmulationStatus, type StickTest } from "../desktop/native/controller.mjs";
 import { errorText, rpc, runningApp, watchRunningApp, type RunningApp } from "./shared";
 import { infoRow, statusPlaceholder } from "./ui";
 
 const readStatus = rpc<[], EmulationStatus>("emulation_get_status");
-const setDefault = rpc<[EmulationMode], EmulationStatus>("emulation_set_default");
+const setDefault = rpc<[EmulationMode, boolean], EmulationStatus>("emulation_set_default");
 const setProfile = rpc<[string, string, EmulationMode, boolean], EmulationStatus>("emulation_set_profile");
 const deleteProfile = rpc<[string], EmulationStatus>("emulation_delete_profile");
 const setSteamMenu = rpc<[boolean], EmulationStatus>("emulation_set_steam_menu");
-const setSteamDiscovery = rpc<[boolean], EmulationStatus>("emulation_set_steam_discovery");
-const refreshSteam = rpc<[], EmulationStatus>("emulation_refresh_steam_detection");
-const reportApp = rpc<[string, string], object>("emulation_report_app");
+const testSticks = rpc<[], StickTest>("emulation_test_sticks");
+const reportApp = rpc<[string, string, boolean], object>("emulation_report_app");
+
+const visibleQamViews = new Set<symbol>();
+let publishQam: (() => void) | undefined;
+
+export function useEmulationQamVisibility(visible: boolean) {
+  useEffect(() => {
+    if (!visible) return;
+    const view = Symbol();
+    visibleQamViews.add(view);
+    publishQam?.();
+    return () => { visibleQamViews.delete(view); publishQam?.(); };
+  }, [visible]);
+}
 
 export function startEmulationWatcher() {
   let pending = false;
+  let stopped = false;
   let last = "";
   let sentAt = -Infinity;
   const check = async (app: RunningApp | null) => {
     const id = app ? String(app.appid) : "";
     const name = app?.display_name || id;
-    const key = `${id}\n${name}`;
+    const qamOpen = visibleQamViews.size > 0;
+    const key = `${id}\n${name}\n${qamOpen}`;
     const now = Date.now();
-    if (pending || (key === last && now - sentAt < 6000)) return;
+    if (stopped || pending || (key === last && now - sentAt < 6000)) return;
     pending = true;
     try {
-      await reportApp(id, name);
+      await reportApp(id, name, qamOpen);
       last = key;
       sentAt = now;
     } catch {
       // The backend falls back to Steam's game processes when the report expires.
-    } finally { pending = false; }
+    } finally {
+      pending = false;
+      if (!stopped && qamOpen !== (visibleQamViews.size > 0)) void check(runningApp());
+    }
   };
-  return watchRunningApp({ check, resume: () => { sentAt = -Infinity; void check(runningApp()); } });
+  const onVisibility = () => void check(runningApp());
+  publishQam = onVisibility;
+  const stop = watchRunningApp({ check, resume: () => { sentAt = -Infinity; void check(runningApp()); } });
+  return () => {
+    stopped = true;
+    if (publishQam === onVisibility) publishQam = undefined;
+    stop();
+  };
 }
 
 type SteamController = { unVendorID?: number; unProductID?: number };
@@ -66,6 +90,7 @@ export function EmulationPage({ visible }: { visible: boolean }) {
   const [status, setStatus] = useState<EmulationStatus | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [stickTest, setStickTest] = useState<StickTest | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedApp, setSelectedApp] = useState("");
   const mounted = useRef(false);
@@ -91,7 +116,7 @@ export function EmulationPage({ visible }: { visible: boolean }) {
     return () => { clearInterval(timer); revision.current += 1; };
   }, [visible]);
 
-  const change = async (action: () => Promise<EmulationStatus>, confirmed = "") => {
+  const perform = async <T,>(action: () => Promise<T>, accept: (next: T) => void) => {
     if (pending.current) return;
     pending.current = true;
     revision.current += 1;
@@ -100,7 +125,7 @@ export function EmulationPage({ visible }: { visible: boolean }) {
     setMessage("");
     try {
       const next = await action();
-      if (mounted.current) { setStatus(next); setMessage(confirmed); }
+      if (mounted.current) accept(next);
     } catch (failure) {
       if (mounted.current) setError(errorText(failure));
     } finally {
@@ -108,6 +133,11 @@ export function EmulationPage({ visible }: { visible: boolean }) {
       if (mounted.current) setBusy(false);
     }
   };
+  const change = (action: () => Promise<EmulationStatus>, confirmed = "") => perform(action, next => {
+    setStatus(next);
+    setStickTest(null);
+    setMessage(confirmed);
+  });
   if (!status) return statusPlaceholder({ title: "Controller emulation", label: "Status unavailable", error,
     onRetry: () => { setError(""); void poll(); } });
 
@@ -133,17 +163,19 @@ export function EmulationPage({ visible }: { visible: boolean }) {
     <PanelSection title="Controller">
       {infoRow("Current controller", emulationNote(status))}
       {error && infoRow("Controller emulation", error)}
-      {message && infoRow("Steam detection", message)}
-      <PanelSectionRow><DropdownItem label="Default controller" description="Used when the running game has no enabled profile. A mode change reconnects the controller."
+      {message && infoRow("Controller emulation", message)}
+      {status.waiting_for_qam && status.effective !== "system" && status.effective !== status.active &&
+        infoRow("Controller change pending", "Close Quick Access to apply the selected controller.")}
+      <PanelSectionRow><DropdownItem label="Default controller" description="Used when the running game has no enabled profile. Close Quick Access to apply a change."
         strDefaultLabel="System default" selectedOption={status.selected} rgOptions={modeChoices(status.selected)}
-        disabled={busy || !status.active} onChange={option => { const mode = option.data; if (validChoice(mode)) void change(() => setDefault(mode)); }} /></PanelSectionRow>
+        disabled={busy || !status.active} onChange={option => {
+          const mode = option.data;
+          if (validChoice(mode)) void change(() => setDefault(mode, true), "Saved. Close Quick Access to apply the controller.");
+        }} /></PanelSectionRow>
       <PanelSectionRow><ToggleField label="Steam Controller in Steam menus" checked={status.steam_menu}
         description="When no game is running, expose the Steam Controller to the Steam interface."
         disabled={busy || (!status.steam_menu && !status.options.includes("steam"))}
         onChange={enabled => void change(() => setSteamMenu(enabled))} /></PanelSectionRow>
-      <PanelSectionRow><ToggleField label="Refresh PlayStation detection in Steam" checked={status.steam_discovery}
-        description="Notify Steam when Companion switches to a DualSense or DualSense Edge, including after resume."
-        disabled={busy} onChange={enabled => void change(() => setSteamDiscovery(enabled))} /></PanelSectionRow>
     </PanelSection>
     <PanelSection title="Game profiles">
       {!app && infoRow("Add a game profile", "Launch a Steam game and open this page while it is running.")}
@@ -163,7 +195,13 @@ export function EmulationPage({ visible }: { visible: boolean }) {
       {detected !== undefined && infoRow("Steam controller list", detected ? "Steam reports a matching PlayStation controller." : "Steam does not list a matching PlayStation controller.")}
       {infoRow("Steam Input", "Enable PlayStation controller support in Steam Settings → Controller to use Steam mapping. For native PlayStation input, use the game's Steam Input override.")}
       {steamInput()?.ShowControllerSettings && <PanelSectionRow><ButtonItem layout="below" onClick={() => steamInput()?.ShowControllerSettings?.()}>Open Steam controller settings</ButtonItem></PanelSectionRow>}
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void change(refreshSteam, "Steam was notified of the virtual controller again.")}>Refresh Steam detection</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy} description="Move both sticks through their full range for four seconds."
+        onClick={() => { setStickTest(null); void perform(testSticks, setStickTest); }}>Test PlayStation sticks</ButtonItem></PanelSectionRow>
+      {stickTest && stickTest.mode === status.active && <>
+        {infoRow("Legion Go 2 sticks", stickTestText(stickTest.physical))}
+        {infoRow("Virtual DualSense sticks", stickTestText(stickTest.virtual))}
+        {infoRow("Test result", stickTestSummary(stickTest))}
+      </>}
     </PanelSection>}
     {(status.active === "ds5-edge" || status.effective === "ds5-edge") && <PanelSection title="DualSense Edge">
       {infoRow("Auxiliary buttons", EDGE_BUTTONS)}
