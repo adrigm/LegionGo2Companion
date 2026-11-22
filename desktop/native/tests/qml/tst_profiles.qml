@@ -254,14 +254,14 @@ TestCase {
         }
     }
     function test_whatDoesNotApplyToThisConsoleIsHidden() {
-        const all={blocked:false,modules:{tdp:{ready:true},fan:{ready:true},vibration:{ready:true},rgb:{ready:true},remap:{ready:true},controller:{ready:true},battery:{ready:true},display:{ready:true},wifi:{ready:true}},
+        const all={blocked:false,modules:{tdp:{ready:true},fan:{ready:true},vibration:{ready:true},rgb:{ready:true},remap:{ready:true},controller:{ready:true},emulation:{ready:true},battery:{ready:true},display:{ready:true},wifi:{ready:true}},
             device:{console:"go2",firmware:true,power_led:true}};
-        const goS={blocked:false,modules:{fan:{applicable:false},display:{applicable:false},remap:{applicable:false},vibration:{applicable:false},controller:{applicable:false},
+        const goS={blocked:false,modules:{fan:{applicable:false},display:{applicable:false},remap:{applicable:false},vibration:{applicable:false},controller:{applicable:false},emulation:{applicable:false},
             rgb:{ready:true},battery:{ready:true},wifi:{ready:true},tdp:{ready:true}},device:{console:"gos",firmware:false,power_led:false}};
-        const hidden=["Fan Control","Vibration","Button mapping","Gyro & touchpad","Display"],kept=["TDP","Lighting","Battery","Wi-Fi"];
+        const hidden=["Fan Control","Vibration","Button mapping","Gyro & touchpad","Controller emulation","Display"],kept=["TDP","Lighting","Battery","Wi-Fi"];
         fake.data=Object.assign({},fake.data,{get_version:all,rgb_get_status:{settings:{control_enabled:true},rgb:{supported:true},power_led:{supported:true,current:true}}});
         panel.page="controller";
-        compare(panel.cards.map(card=>card.owner).join(","),"vibration,remap,controller,controller,controller,firmware");
+        compare(panel.cards.map(card=>card.owner).join(","),"vibration,remap,controller,controller,firmware");
         for(const name of hidden.concat(kept))verify(field("modules",name).visible(),name);
         compare(field("modules","Lighting").note(),"Stick lights and power button light.");
         verify(field("rgb","Power button light").visible());
@@ -314,25 +314,25 @@ TestCase {
         verify(!panel.fieldEnabled("controller",field("controller","Controller test")),"No physical controller: no test");
     }
     // Shown only where both pads have the timer; nothing is claimed or written until the user picks a time.
-    function test_controllerEmulationWaitsForSupportAndDiagnostics() {
-        fake.data=Object.assign({},fake.data,{get_version:{blocked:false,modules:{controller:{enabled:true,ready:true}}}});
+    function test_controllerEmulationHasItsOwnPageAndGameProfile() {
+        fake.data=Object.assign({},fake.data,{get_version:{blocked:false,modules:{controller:{enabled:true,ready:true},emulation:{enabled:true,ready:true}}}});
         panel.page="controller";
-        const emulation=panel.cards.find(card=>card.title==="Controller emulation");
-        verify(emulation!==undefined);
-        verify(!emulation.visible(),"No emulation block on controllers that do not report support");
-        fake.data=Object.assign({},fake.data,{controller_get_status:{emulation:{
-            selected:"system",active:"steam",options:["steam","xbox-elite","ds5"],reason:""}}});
-        verify(emulation.visible());
-        const selector=field("controller","Emulated controller");
-        compare(selector.get(),"system");
-        compare(selector.choices().map(option=>option.id).join(","),"system,steam,xbox-elite,ds5");
-        fake.diagnosticToken="test";
+        verify(!panel.cards.some(card=>card.title==="Controller emulation"));
+        panel.page="emulation";
+        compare(panel.cards.map(card=>card.title).join(","),"Controller emulation,Game profiles");
+        const selector=field("emulation","Default controller");
         verify(!selector.available());
-        fake.diagnosticToken="";
+        fake.data=Object.assign({},fake.data,{emulation_get_status:{selected:"system",active:"steam",effective:"system",
+            options:["steam","xbox-elite","ds5","ds5-edge"],running_app:"42",running_name:"Example Game",profiles:{},reason:""}});
         verify(selector.available());
+        compare(selector.get(),"system");
+        compare(selector.choices().map(option=>option.id).join(","),"system,steam,xbox-elite,ds5,ds5-edge");
         selector.set("ds5");
-        compare(fake.calls[0].method,"controller_set_emulation");
+        compare(fake.calls[0].method,"emulation_set_default");
         compare(fake.calls[0].args.join(","),"ds5");
+        field("emulation","Controller for this game").set("ds5-edge");
+        compare(fake.calls[1].method,"emulation_set_profile");
+        compare(fake.calls[1].args.join(","),"42,Example Game,ds5-edge,false");
     }
     function test_controllerSleepWaitsForTheUsersChoice() {
         fake.data=Object.assign({},fake.data,{get_version:{blocked:false,modules:{controller:{enabled:true,ready:true}}},
@@ -476,7 +476,7 @@ TestCase {
             vibe_is_ready:{ready:true},vibe_get_settings:{settings:{},app_id:"0",profile_id:"0"},
             rgb_get_status:{settings:{control_enabled:true},rgb:{supported:true}},remap_get_status:{supported:true}});
         panel.page="controller";
-        compare(panel.cards.map(card=>card.owner).join(","),"vibration,remap,controller,controller,controller,firmware","Firmware stays last");
+        compare(panel.cards.map(card=>card.owner).join(","),"vibration,remap,controller,controller,firmware","Firmware stays last");
         const firmware=panel.cards.find(c=>c.owner==="firmware");
         verify(firmware!==undefined);
         panel.page="rgb";compare(panel.cards.map(card=>card.owner).join(","),"rgb");panel.page="controller";
