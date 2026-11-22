@@ -86,12 +86,13 @@ def sony_discovery_nodes(target: str | None) -> tuple[Path, ...]:
     return tuple(hidraw + events)
 
 
-def refresh_steam_detection(nodes: tuple[Path, ...]) -> None:
+def refresh_steam_detection(nodes: tuple[Path, ...], *, reconnect: bool = False) -> None:
     # An empty udevadm trigger would enumerate devices outside this controller.
     if not nodes:
         return
     try:
-        result = run(["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)],
+        action = "add" if reconnect else "change"
+        result = run(["/usr/bin/udevadm", "trigger", f"--action={action}", "--settle", *map(str, nodes)],
                      5.0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise InputPlumberError("Could not refresh Steam controller discovery.") from exc

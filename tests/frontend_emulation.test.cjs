@@ -24,4 +24,19 @@ run(async () => {
   assert.equal(picker().props.description, undefined);
   assert.doesNotMatch(text(h.render()), /Game profiles|Steam Controller in Steam menus|Test PlayStation sticks|SteamDeck=0/);
   h.unmount();
+
+  const router = { MainRunningApp: null };
+  const lifecycle = mount('emulation.tsx', { ui: { Router: router } });
+  const stop = lifecycle.exports.startEmulationWatcher();
+  await settle();
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false]);
+  router.MainRunningApp = { appid: 2322010 };
+  lifecycle.fire('interval');
+  await settle();
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, true]);
+  router.MainRunningApp = null;
+  lifecycle.fire('interval');
+  await settle();
+  assert.deepEqual(lifecycle.calls.at(-1).args, [false, false]);
+  stop();
 });

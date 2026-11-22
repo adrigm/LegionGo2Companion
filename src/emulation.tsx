@@ -2,12 +2,12 @@
 import { DropdownItem, PanelSection, PanelSectionRow } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
 import { emulationOptions, type EmulationMode, type EmulationStatus } from "../desktop/native/controller.mjs";
-import { errorText, rpc } from "./shared";
+import { errorText, rpc, runningApp } from "./shared";
 import { infoRow, statusPlaceholder } from "./ui";
 
 const readStatus = rpc<[], EmulationStatus>("emulation_get_status");
 const setDefault = rpc<[EmulationMode, boolean], EmulationStatus>("emulation_set_default");
-const reportQam = rpc<[boolean], object>("emulation_report_qam");
+const reportQam = rpc<[boolean, boolean], object>("emulation_report_qam");
 
 const visibleQamViews = new Set<symbol>();
 let publishQam: (() => void) | undefined;
@@ -28,9 +28,10 @@ export function startEmulationWatcher() {
   const publish = async () => {
     if (pending || stopped) return;
     const open = visibleQamViews.size > 0;
+    const inGame = !!Number(runningApp()?.appid);
     pending = true;
     try {
-      await reportQam(open);
+      await reportQam(open, inGame);
     } catch {
       // The heartbeat retries after Decky reconnects.
     } finally {

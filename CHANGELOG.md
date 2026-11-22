@@ -2,6 +2,10 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.6] - 2026-11-22
+
+- When a game closes, announce the selected virtual DualSense or DualSense Edge to Steam again after Quick Access closes. If InputPlumber recreates the Legion controller without a gamepad, restore the saved selection and keep the new composite's auxiliary devices.
+
 ## [2.5.5] - 2026-11-22
 
 - Restore Steam discovery for DualSense and DualSense Edge by announcing their HID and input event interfaces together after Quick Access closes. Refresh when a new interface appears or the handheld wakes.

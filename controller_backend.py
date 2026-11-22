@@ -784,7 +784,7 @@ class Plugin:
             self._emulation_retry_at = 0.0
             return target if apply else None
 
-    def _sync_emulation(self, *, release=False, now=None, resumed=False) -> str | None:
+    def _sync_emulation(self, *, release=False, now=None, resumed=False, game_exited=False) -> str | None:
         with self._operation:
             saved = _emulation_choice()
             if _console() != "go2" or (release and not self._emulation_owner):
@@ -793,7 +793,7 @@ class Plugin:
                 return
             emulation = controller_emulation
             now = time.monotonic() if now is None else now
-            if resumed:
+            if resumed or game_exited:
                 self._emulation_candidate = None
                 self._emulation_retry_at = 0.0
             try:
@@ -836,7 +836,9 @@ class Plugin:
                     self._emulation_candidate = None
                     return active
 
-                missing = active is None and owned
+                # _emulation_device matched the physical LG2 to exactly one composite.
+                # A recreated composite can have no pad before we have ever owned it.
+                missing = active is None and (owned or saved is not None)
                 reset = active is not None and emulation.GAMEPADS[active] == emulation.GAMEPADS[baseline]
                 changed = target != self._emulation_requested
                 if not (missing or reset or (owned and active == last_applied and changed)):
@@ -857,7 +859,8 @@ class Plugin:
                 self._emulation_requested = target
                 self._emulation_retry_at = now + EMULATION_RETRY_SECONDS
                 if missing:
-                    emulation.recover(device, current, self._emulation_targets, target, baseline)
+                    confirmed = self._emulation_targets if owned else [baseline, *current]
+                    emulation.recover(device, current, confirmed, target, baseline)
                 else:
                     emulation.switch(device, current, target)
                 self._emulation_owner = owner

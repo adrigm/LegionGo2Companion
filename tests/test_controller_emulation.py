@@ -60,6 +60,9 @@ class TargetTests(unittest.TestCase):
             emulation.refresh_steam_detection(nodes)
             self.assertEqual(run.call_args.args[0],
                              ["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)])
+            emulation.refresh_steam_detection(nodes, reconnect=True)
+            self.assertEqual(run.call_args.args[0],
+                             ["/usr/bin/udevadm", "trigger", "--action=add", "--settle", *map(str, nodes)])
 
     def test_queries_only_the_discovered_service_and_reads_scalar_target_types(self):
         path = "/org/shadowblip/InputPlumber/devices/target/gamepad0"
@@ -188,6 +191,46 @@ class EmulationPreferenceTests(unittest.TestCase):
         self.assertEqual(self.live, BASE)
         self.assertEqual(self.state.committed["emulation"]["target"], "xbox-elite")
 
+    def test_game_exit_recovers_a_new_composite_with_only_its_own_auxiliaries(self):
+        self.plugin._set_emulation("ds5")
+        replacement = {**DEVICE, "generation": "legion|:1.43", "service_owner": ":1.43"}
+        self.live = ["keyboard"]
+        self.plugin._emulation_retry_at = 200
+        with (patch.object(self.plugin, "_emulation_device", return_value=replacement),
+              patch.object(emulation, "_set_targets", side_effect=lambda _, kinds: self.live.__setitem__(slice(None), kinds))):
+            self.plugin._sync_emulation(now=20, game_exited=True)
+            self.assertEqual(self.live, ["keyboard"])
+            self.plugin._sync_emulation(now=22)
+            self.assertEqual(self.live, ["ds5", "keyboard"])
+            self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
+
+    def test_menu_reannounces_existing_sony_pad_once_without_switching_it(self):
+        self.plugin._set_emulation("ds5-edge")
+        watcher = emulation_backend.Plugin(self.plugin)
+        watcher._running = True
+        nodes = (Path("hidraw/hidraw4"), Path("input/input3/event8"))
+        def report(now, qam, running):
+            with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: now)):
+                asyncio.run(watcher.report_qam(qam, running))
+        with (patch.object(emulation, "sony_discovery_nodes", return_value=nodes),
+              patch.object(emulation, "refresh_steam_detection") as refresh,
+              patch.object(emulation, "switch") as switch):
+            report(1, False, False)
+            watcher._tick(2, False)
+            report(4, False, True)
+            watcher._tick(5, False)
+            report(8, True, False)
+            watcher._tick(12, False)
+            self.assertEqual(refresh.call_count, 1)
+            report(14, False, False)
+            watcher._tick(14.5, False)
+            watcher._tick(16, False)
+            report(17, False, False)
+            watcher._tick(18, False)
+            self.assertEqual(refresh.call_count, 2)
+            refresh.assert_called_with(nodes, reconnect=True)
+            switch.assert_not_called()
+
     def test_watch_waits_for_resume_to_settle_and_checks_again(self):
         self.plugin._set_emulation("xbox-elite")
         watcher = emulation_backend.Plugin(self.plugin)
@@ -242,7 +285,7 @@ class EmulationPreferenceTests(unittest.TestCase):
             refresh.assert_not_called()
             watcher._tick(14, False)
             watcher._tick(16, False)
-            refresh.assert_called_once_with(node.return_value)
+            refresh.assert_called_once_with(node.return_value, reconnect=False)
             node.return_value += (Path("input/input3/event8"),)
             watcher._tick(18, False)
             watcher._tick(20, False)

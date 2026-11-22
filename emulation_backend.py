@@ -37,6 +37,11 @@ class Plugin:
         self._deferred_at = None
         self._steam_nodes = ()
         self._discovery_retry_at = None
+        self._discovery_reconnect = False
+        self._game_running = False
+        self._last_exit = None
+        self._handled_exit = None
+        self._menu_add_pending = False
 
     @staticmethod
     def applicable():
@@ -73,10 +78,16 @@ class Plugin:
         await _offload(self._set_default, _mode(mode), after_qam)
         return await self.get_status()
 
-    async def report_qam(self, opened):
-        if type(opened) is not bool:
+    async def report_qam(self, opened, game_running=None):
+        if type(opened) is not bool or (game_running is not None and type(game_running) is not bool):
             raise ValueError("Invalid Quick Access state.")
         now = time.monotonic()
+        if game_running is not None:
+            if self._game_running and not game_running:
+                self._last_exit = now
+            elif game_running:
+                self._last_exit = None
+            self._game_running = game_running
         if not opened and self._qam_open:
             self._qam_closed_at = now
         self._qam_open = opened
@@ -85,17 +96,20 @@ class Plugin:
 
     def _refresh_steam(self, target, now, resumed):
         nodes = controller_emulation.sony_discovery_nodes(target)
-        changed = nodes != self._steam_nodes or resumed
+        reconnect = bool(nodes) and self._menu_add_pending
+        changed = nodes != self._steam_nodes or resumed or reconnect
         if changed:
             self._steam_nodes = nodes
             self._discovery_retry_at = None
+            self._discovery_reconnect = reconnect
         elif self._discovery_retry_at is None or now < self._discovery_retry_at:
             return
         if not nodes:
             return
+        self._menu_add_pending = False
         self._discovery_retry_at = None
         try:
-            controller_emulation.refresh_steam_detection(nodes)
+            controller_emulation.refresh_steam_detection(nodes, reconnect=self._discovery_reconnect)
         except controller_emulation.InputPlumberError as exc:
             if changed:
                 self._discovery_retry_at = now + 10.0
@@ -105,8 +119,19 @@ class Plugin:
         with self._controller._operation:
             if not self._running or self._qam_blocks_switch(now):
                 return
+            last_exit = self._last_exit
+            game_exited = last_exit is not None and last_exit != self._handled_exit
+            if game_exited and now - last_exit < QAM_SETTLE_SECONDS:
+                return
+            if self._game_running:
+                self._menu_add_pending = False
+            if game_exited:
+                self._handled_exit = last_exit
+                self._menu_add_pending = True
             self._deferred_at = None
-            target = self._controller._sync_emulation(now=now, resumed=resumed)
+            target = self._controller._sync_emulation(now=now, resumed=resumed, game_exited=game_exited)
+            if target and controller_emulation.GAMEPADS.get(target) not in controller_emulation.SONY_PRODUCTS:
+                self._menu_add_pending = False
             self._refresh_steam(target, now, resumed)
             return True
 
@@ -150,4 +175,8 @@ class Plugin:
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
         await module_runtime.drain("emulation")
+        self._game_running = False
+        self._last_exit = self._handled_exit = None
+        self._menu_add_pending = False
+        self._discovery_reconnect = False
         await _offload(self._controller._sync_emulation, release=True)
