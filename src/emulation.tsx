@@ -43,7 +43,12 @@ let publishQam: (() => void) | undefined;
 
 function qamOpen(): boolean {
   try {
-    const instance = Router?.GetFocusedWindowInstance?.() ?? Router?.WindowStore?.GamepadUIMainWindowInstance;
+    type SteamWindow = { MenuStore?: { GetOpenSideMenu?(): number } };
+    const router = Router as unknown as {
+      GetFocusedWindowInstance?(): SteamWindow | null;
+      WindowStore?: { GamepadUIMainWindowInstance?: SteamWindow };
+    };
+    const instance = router?.GetFocusedWindowInstance?.() ?? router?.WindowStore?.GamepadUIMainWindowInstance;
     const menu = instance?.MenuStore?.GetOpenSideMenu?.();
     if (typeof menu === "number") return menu === 2; // Steam's SideMenu.QuickAccess
   } catch { /* Use Decky's mounted views while the Steam window is unavailable. */ }
