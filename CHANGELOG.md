@@ -2,6 +2,10 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.1] - 2026-11-22
+
+- **Quick Access:** place Companion at the top of Steam's Quick Access Menu and use a 24 px icon there.
+
 ## [2.5.0] - 2026-11-22
 
 - **Quick Access:** add an optional Companion tab in Steam's Quick Access Menu. The plugin remains available from Decky.

@@ -22,7 +22,7 @@ function tabsHook() {
 }
 
 // Some Decky builds reuse the rendered array and compare only the number of Decky tabs.
-// Reconcile our entry before that comparison so changing the checkbox cannot duplicate Decky's tab.
+// Reconcile our entry before that comparison, then move it ahead of the native tabs.
 function reconcileCachedTab(hook: TabsHook, tab: Tab) {
   const render = hook.render;
   if (typeof render !== "function" || Object.prototype.hasOwnProperty.call(hook, "render")) return;
@@ -39,14 +39,23 @@ function reconcileCachedTab(hook: TabsHook, tab: Tab) {
       if (shortcut) entries.push(shortcut);
     }
     if (!enabled && disposed && hook.render === wrapped) delete hook.render;
-    return render.call(this, entries, visible);
+    const result = render.call(this, entries, visible);
+    if (enabled) {
+      const index = entries.findIndex(isShortcut);
+      if (index > 0) entries.unshift(entries.splice(index, 1)[0]);
+    }
+    return result;
   };
   hook.render = wrapped;
   return () => { disposed = true; };
 }
 
 export function createQamShortcut(view: Omit<Tab, "id" | "owner">) {
-  const tab = { ...view, id: TAB_ID, owner: OWNER };
+  const tab = {
+    ...view, id: TAB_ID, owner: OWNER,
+    // Another plugin may already own Decky's renderer. Keep our visual order in that case.
+    icon: <><style>{`#quickaccess_tab_${TAB_ID} { order: -1; }`}</style>{view.icon}</>,
+  };
   let state: State = { enabled: false, registered: false };
   const listeners = new Set<(next: State) => void>();
   let registeredWith: TabsHook | undefined;
@@ -133,6 +142,6 @@ export function QamShortcutSetting({ shortcut }: { shortcut: ReturnType<typeof c
   const [value, setValue] = useState(shortcut.state);
   useEffect(() => shortcut.watch(setValue), [shortcut]);
   return <PanelSectionRow><ToggleField label="Show Companion in Quick Access" checked={value.enabled}
-    description={value.error || (value.registered ? "Shortcut added. Reopen Quick Access to see it." : "Add a Companion tab beside Decky.")}
+    description={value.error || (value.registered ? "Shortcut added. Reopen Quick Access to see it." : "Add Companion at the top of Quick Access.")}
     onChange={checked => shortcut.set(checked)} /></PanelSectionRow>;
 }

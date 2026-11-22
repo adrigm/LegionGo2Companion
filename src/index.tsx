@@ -334,9 +334,10 @@ const Content: FC = () => {
   return <Controls modules={status.modules} device={status.device} home={status.home} />;
 };
 
-const Icon: FC = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-    style={{ width: "1em", height: "1em" }}>
+const Icon: FC<{ quickAccess?: boolean }> = ({ quickAccess = false }) => (
+  <svg viewBox={quickAccess ? "0 2 24 24" : "0 0 24 24"} fill="none" stroke="currentColor" strokeWidth={quickAccess ? 2 : 1.8}
+    width={quickAccess ? 24 : "1em"} height={quickAccess ? 24 : "1em"}
+    style={quickAccess ? { width: 24, height: 24, flexShrink: 0, display: "block" } : { width: "1em", height: "1em" }} aria-hidden="true">
     <path d="M7 8h10a5 5 0 0 1 4.7 6.7l-1.1 3.1a2 2 0 0 1-3.3.8L15 16H9l-2.3 2.6a2 2 0 0 1-3.3-.8l-1.1-3.1A5 5 0 0 1 7 8Z" />
     <circle cx="8" cy="12" r="2" />
     <circle cx="16" cy="12" r="2" />
@@ -357,7 +358,7 @@ export default definePlugin(() => {
   frontendActive = true;
   resetSession(true);
   const listener = addEventListener<[GuardStatus]>("companion_guard", updateGuard);
-  qamShortcut = createQamShortcut({ title: "Legion Go 2 Companion", content: <Content />, icon: <Icon /> });
+  qamShortcut = createQamShortcut({ title: "Legion Go 2 Companion", content: <Content />, icon: <Icon quickAccess /> });
   void refreshGuard();
   return {
     name: "Legion Go 2 Companion",
