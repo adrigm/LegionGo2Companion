@@ -2,6 +2,13 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.4.4] - 2026-11-22
+
+### 🐛 Fixed
+
+- **Controller emulation:** recover a lost virtual gamepad and reapply the saved mode after InputPlumber
+  restores the system target on resume. Recovery waits for the target list to settle and limits retries.
+
 ## [2.4.3] - 2026-11-22
 
 ### ✨ Added
