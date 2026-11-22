@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const ts = require(path.join(root, 'node_modules/typescript'));
 // These src/ modules always run for real, even where tests stub other pages; so does every desktop/native/*.mjs.
-const REAL_MODULES = new Set(['./shared', './ui', './about', './curve', './result', './tdp_api', './tdp_watcher', './tdp_cpu', './tdp_state', './tdp_sections', './vibration_api', './overview']);
+const REAL_MODULES = new Set(['./shared', './ui', './about', './curve', './result', './tdp_api', './tdp_watcher', './tdp_cpu', './tdp_state', './tdp_sections', './vibration_api', './overview', './emulation', './qam']);
 
 // Fake timers leave no native event-loop handle, so a pending top-level promise
 // would let Node exit successfully; require explicit completion instead.

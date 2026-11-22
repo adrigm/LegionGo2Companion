@@ -20,6 +20,8 @@ import { RgbPage, rgbSummary } from "./rgb";
 import { RemapPage, remapSummary } from "./remap";
 import { BatteryPage, batterySummary } from "./battery";
 import { ControllerPage, controllerSummary } from "./controller";
+import { EmulationPage, startEmulationWatcher } from "./emulation";
+import { createQamShortcut, QamShortcutSetting } from "./qam";
 import { DeviceReportSection } from "./report";
 import { AboutPage, UpdateController, type UpdateCheck, type UpdateDownload } from "./about";
 import { FirmwarePanel } from "./firmware";
@@ -62,6 +64,8 @@ let guardStatus: GuardStatus | null = null;
 const guardListeners = new Set<(status: GuardStatus) => void>();
 let tdpWatcherEnabled = false;
 let vibeWatcherEnabled = false;
+let stopEmulationWatcher: (() => void) | undefined;
+let qamShortcut: ReturnType<typeof createQamShortcut> | undefined;
 let frontendActive = false;
 let guardRead: Promise<GuardStatus> | null = null;
 let guardUnavailable = false;
@@ -73,6 +77,7 @@ const pauseUnavailableGuard = () => {
   // A missing/malformed reply is transient, not a latched plugin conflict.
   tdpWatcherEnabled = vibeWatcherEnabled = false;
   stopTdpWatcher(); stopVibrationWatcher();
+  stopEmulationWatcher?.(); stopEmulationWatcher = undefined;
   pauseOverview();
   guardListeners.forEach(listener => listener({version: PLUGIN_VERSION, blocked: true,
     guard_error: "Could not verify installed plugins. Check the Decky connection and try again."}));
@@ -90,6 +95,9 @@ const updateGuard = (status: GuardStatus) => {
   const vibeEnabled = enabled && moduleEnabled(status.modules ?? {}, "vibration");
   if (tdpEnabled !== tdpWatcherEnabled) { tdpWatcherEnabled = tdpEnabled; tdpEnabled ? startTdpWatcher() : stopTdpWatcher(); }
   if (vibeEnabled !== vibeWatcherEnabled) { vibeWatcherEnabled = vibeEnabled; vibeEnabled ? startVibrationWatcher() : stopVibrationWatcher(); }
+  const emulationEnabled = enabled && !!status.modules?.emulation && moduleEnabled(status.modules, "emulation");
+  if (emulationEnabled && !stopEmulationWatcher) stopEmulationWatcher = startEmulationWatcher();
+  if (!emulationEnabled && stopEmulationWatcher) { stopEmulationWatcher(); stopEmulationWatcher = undefined; }
   guardListeners.forEach(listener => listener(status));
 };
 const refreshGuard = async () => {
@@ -120,6 +128,7 @@ const sectionIcons: Record<SectionKey, ReactNode> = {
   rgb: <><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 2 2 0 0 1 1-3.3h2a4 4 0 0 0 4-4c0-4-4-7-9-7Z" /><circle cx="7" cy="10" r=".8" /><circle cx="10" cy="7" r=".8" /><circle cx="15" cy="7" r=".8" /></>,
   remap: <><path d="M7 7h10a4 4 0 0 1 4 4l-1 7-5-3H9l-5 3-1-7a4 4 0 0 1 4-4Z" /><path d="M6 11h4m-2-2v4m7-2h.01m3 2h.01" /></>,
   controller: <><path d="M12 3v18M3 12h18m-9-9-3 3m3-3 3 3m6 6-3-3m3 3-3 3m-6 6-3-3m3 3 3-3M3 12l3-3m-3 3 3 3" /></>,
+  emulation: <><path d="M4 8h15m-4-4 4 4-4 4m5 4H5m4-4-4 4 4 4" /></>,
   battery: <><rect x="3" y="6" width="17" height="12" rx="2" /><path d="M22 10v4m-9-6-4 5h5l-3 4" /></>,
   display: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></>,
   wifi: <><path d="M2 8a16 16 0 0 1 20 0M5 12a11 11 0 0 1 14 0m-11 4a6 6 0 0 1 8 0" /><circle cx="12" cy="20" r=".8" /></>,
@@ -152,7 +161,7 @@ const ModulesPage: FC<{ modules: ModuleStates; device: Device }> = ({ modules, d
   // The page header already says "Manage modules".
   return <PanelSection>
     {infoRow("Choose your modules", "Turning a module off stops it and hides it. Its settings are kept.")}
-    {(Object.keys(moduleLabels) as ModuleKey[]).filter(name => moduleShown(modules[name])).map(name => <PanelSectionRow key={name}>
+    {(Object.keys(moduleLabels) as ModuleKey[]).filter(name => (name !== "emulation" || !!modules.emulation) && moduleShown(modules[name])).map(name => <PanelSectionRow key={name}>
       <ToggleField label={moduleLabels[name]} checked={moduleChecked(modules[name])} disabled={busy !== null || moduleLocked(modules[name])}
         description={busy === name ? "Applying…" : (error?.key === name && error.text) || moduleNote(name, modules[name], device)}
         onChange={enabled => void change(name, enabled)} />
@@ -244,11 +253,14 @@ const Controls: FC<{modules?: ModuleStates; device?: Device; home?: string}> = (
         moduleEnabled(modules, "controller") ? moduleLabels.controller : "Controller firmware",
         moduleEnabled(modules, "controller") ? summary("controller", controllerSummary(overview.controller))
           : { description: "Controller update status and Lenovo firmware updates" })}
+      {!!modules.emulation && moduleEnabled(modules, "emulation") && link("emulation", moduleLabels.emulation,
+        { description: "Choose a virtual controller and set profiles for your games" })}{startingRow("emulation")}
       {moduleEnabled(modules, "battery") && link("battery", moduleLabels.battery, summary("battery", batterySummary(overview.battery, controllerBatteries ? overview.controller_batteries : undefined)))}{startingRow("battery")}
       {moduleEnabled(modules, "display") && link("display", moduleLabels.display, summary("display", displaySummary(overview.display)))}{startingRow("display")}
       {moduleEnabled(modules, "wifi") && link("wifi", moduleLabels.wifi, summary("wifi", wifiSummary(overview.wifi)))}{startingRow("wifi")}
     </PanelSection>
     <PanelSection title="Plugin">
+      {qamShortcut && <QamShortcutSetting shortcut={qamShortcut} />}
       {link("modules", "Manage modules", { description: "Enable, disable and hide individual hardware modules" })}
       {link("about", "About", { description: `Version ${overview.version} · updates` })}
     </PanelSection>
@@ -275,6 +287,7 @@ const Controls: FC<{modules?: ModuleStates; device?: Device; home?: string}> = (
     {activeSection === "wifi" && <WifiPage visible={onScreen} />}
     {activeSection === "rgb" && <RgbPage visible={onScreen} powerLight={device.power_led !== false} />}
     {activeSection === "remap" && <RemapPage visible={onScreen} />}
+    {activeSection === "emulation" && <EmulationPage visible={pageVisible} />}
     {activeSection === "controller" && (moduleEnabled(modules, "controller") ? <ControllerPage visible={pageVisible} firmware={device.firmware !== false} />
       : <FirmwarePanel visible={pageVisible} allowUpdates={!Object.values(modules).some(state => state?.maintenance)} />)}
     {activeSection === "battery" && <BatteryPage visible={onScreen} controllers={controllerBatteries} />}
@@ -344,6 +357,7 @@ export default definePlugin(() => {
   frontendActive = true;
   resetSession(true);
   const listener = addEventListener<[GuardStatus]>("companion_guard", updateGuard);
+  qamShortcut = createQamShortcut({ title: "Legion Go 2 Companion", content: <Content />, icon: <Icon /> });
   void refreshGuard();
   return {
     name: "Legion Go 2 Companion",
@@ -363,6 +377,8 @@ export default definePlugin(() => {
       guardListeners.clear();
       stopTdpWatcher();
       stopVibrationWatcher();
+      stopEmulationWatcher?.(); stopEmulationWatcher = undefined;
+      qamShortcut?.dispose(); qamShortcut = undefined;
     },
   };
 });

@@ -38,7 +38,7 @@ QtObject {
     function age(method) { return received[method] === undefined ? Infinity : now()-received[method]; }
     function owner(method) {
         if(method==="get_version" || method==="desktop_context" || method.startsWith("modules_") || method.startsWith("updates_") || method.startsWith("firmware_"))return "";
-        for(const pair of [["fan_","fan"],["vibe_","vibration"],["rgb_","rgb"],["remap_","remap"],["controller_","controller"],["battery_","battery"],["display_","display"],["wifi_","wifi"]])
+        for(const pair of [["fan_","fan"],["vibe_","vibration"],["rgb_","rgb"],["remap_","remap"],["controller_","controller"],["emulation_","emulation"],["battery_","battery"],["display_","display"],["wifi_","wifi"]])
             if(method.startsWith(pair[0]))return pair[1];
         return "tdp";
     }
@@ -100,7 +100,7 @@ QtObject {
         const panels = {
             tdp:["get_settings","get_caps","get_extras_unlocked","get_power_source","get_tdp_info","get_cpu_power_controls","list_game_profiles"],
             fan:["fan_get_state"],
-            rgb:["rgb_get_status"],
+            rgb:["rgb_get_status"], emulation:["emulation_get_status"],
             battery:["battery_get_status","battery_get_controller_levels"],
             display:["display_get_state"], wifi:["wifi_get_status"], modules:[], about:[]
         };
@@ -196,6 +196,7 @@ QtObject {
                 let key = method;
                 if (method.startsWith("fan_")) key = "fan_get_state";
                 else if (method.startsWith("firmware_")) key = "firmware_get_status";
+                else if (method.startsWith("emulation_")) key = "emulation_get_status";
                 if(method.startsWith("firmware_")) {
                     if(request.mutation)backend.firmwareStepError="";
                     const errors=Object.assign({},backend.readErrors);errors.firmware_get_status="";backend.readErrors=errors;

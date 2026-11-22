@@ -9,6 +9,7 @@ from test_controller_backend import MemorySettings
 
 import controller_backend as backend
 import controller_emulation as emulation
+import emulation_backend as profiles
 
 
 DEVICE = {
@@ -149,27 +150,45 @@ class EmulationPreferenceTests(unittest.TestCase):
 
     def test_watch_waits_for_resume_to_settle_and_checks_again(self):
         self.plugin._set_emulation("xbox-elite")
+        watcher = profiles.Plugin(self.plugin)
+        watcher._running = True
         clock = [0.0]
         live_after_tick = {}
 
         async def sleep(seconds):
             live_after_tick[clock[0]] = self.live[0]
             clock[0] += seconds
-            if clock[0] == 5:
+            if clock[0] == 2:
                 self.live = BASE.copy()
-            if clock[0] > 25:
+            if clock[0] > 18:
                 raise asyncio.CancelledError
 
-        with (patch.object(backend, "time", types.SimpleNamespace(monotonic=lambda: clock[0])),
-              patch.object(backend.asyncio, "sleep", side_effect=sleep),
+        with (patch.object(profiles, "time", types.SimpleNamespace(monotonic=lambda: clock[0])),
+              patch.object(profiles.asyncio, "sleep", side_effect=sleep),
               patch.object(backend.module_runtime, "suspend_offset", side_effect=lambda: 10 if clock[0] else 0),
-              patch.object(self.plugin, "_sleep_check", new_callable=AsyncMock),
-              patch.object(self.plugin, "_watch_check", new_callable=AsyncMock)):
+              patch.object(watcher, "_tick_async", new=AsyncMock(side_effect=watcher._tick))):
             with self.assertRaises(asyncio.CancelledError):
-                asyncio.run(self.plugin._watch())
-        self.assertEqual(live_after_tick[15], "deck-uhid")
-        self.assertEqual(live_after_tick[20], "deck-uhid")
-        self.assertEqual(live_after_tick[25], "xbox-elite")
+                asyncio.run(watcher._watch())
+        self.assertEqual(live_after_tick[12], "deck-uhid")
+        self.assertEqual(live_after_tick[14], "deck-uhid")
+        self.assertEqual(live_after_tick[16], "xbox-elite")
+
+    def test_game_profile_switches_and_restores_the_saved_default(self):
+        self.plugin._set_emulation("xbox-elite")
+        watcher = profiles.Plugin(self.plugin)
+        watcher._running = True
+        watcher._set_profile("200", "Example Game", "ds5-edge", True)
+        with patch.object(watcher, "_app_context", return_value=("200", "Example Game")) as context:
+            watcher._tick(10, False)
+            self.assertEqual(self.live, ["ds5-edge", *BASE[1:]])
+            self.assertEqual(self.state.committed["emulation"]["target"], "xbox-elite")
+            context.return_value = ("", "")
+            watcher._tick(12, False)
+            self.assertEqual(self.live, ["xbox-elite", *BASE[1:]])
+            context.return_value = ("200", "Example Game")
+            watcher._set_profile("200", "Example Game", "ds5-edge", False)
+            watcher._tick(14, False)
+            self.assertEqual(self.live, ["xbox-elite", *BASE[1:]])
 
     def test_switch_during_diagnostics_does_not_change_the_gamepad(self):
         self.plugin._capture = {"active": True}

@@ -13,11 +13,12 @@ ApplicationWindow {
     property string page:"overview"
     property var pages:[
         {id:"overview",label:"Overview"},{id:"tdp",label:"TDP"},{id:"fan",label:"Fan Control"},
-        {id:"controller",label:"Controllers"},{id:"rgb",label:"Lighting"},{id:"battery",label:"Battery"},{id:"display",label:"Display"},
+        {id:"controller",label:"Controllers"},{id:"emulation",label:"Controller emulation"},{id:"rgb",label:"Lighting"},{id:"battery",label:"Battery"},{id:"display",label:"Display"},
         {id:"wifi",label:"Wi-Fi"},{id:"modules",label:"Modules"},{id:"about",label:"About"}]
     // A page whose modules do not apply to this console is hidden (Controllers also holds controller firmware).
     function pageShown(id) {
         const gate=bridgeModel.state("get_version"),shown=name=>Modules.moduleShown(gate?.modules?.[name]);
+        if(id==="emulation")return !!gate?.modules?.emulation && shown(id);
         // Until the first answer says which modules apply, only the pages that always apply are listed.
         if(!gate?.modules || Modules.consoleDetecting(gate.modules))return ["controller","tdp","fan","rgb","battery","display","wifi"].indexOf(id)<0;
         return id==="controller"?["vibration","remap","controller"].some(shown) || gate?.device?.firmware!==false:

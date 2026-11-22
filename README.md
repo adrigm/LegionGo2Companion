@@ -32,6 +32,7 @@ same controls are also available as a native [Desktop app](#desktop-app).
 | [Lighting](#lighting) | Set the stick-light effect, colour, brightness and speed, and switch the power-button light |
 | [Button mapping](#button-mapping) | Give the two extra buttons on the left controller your own actions |
 | [Gyro & touchpad](#gyro--touchpad) | Choose which controller's gyro Steam uses, test the gyro and touchpad, and set when the detached controllers turn off |
+| [Controller emulation](#controller-emulation) | Choose the virtual gamepad and switch automatically with per-game profiles |
 | [Controller firmware](#controller-firmware) | Update the controllers and their receiver with Lenovo's firmware (experimental) |
 | [Battery](#battery) | Limit charging to about 80% and see the console and both controller batteries |
 | [Display](#display) | Fix the HDR brightness games read |
@@ -201,6 +202,8 @@ state and logs in `/var/lib/legiongo2companion*` and `/var/log/legiongo2companio
 folders after uninstalling for a full cleanup.
 
 ## Quick start
+
+Enable **Show Companion in Quick Access** under **Plugin** to add its own tab to Steam's quick menu. Reopen Quick Access to see the tab. You can also open Companion from Decky.
 
 Open Companion in Decky. **Hardware controls** shows a short status for each module. Select
 a row to open its page and use **‹ All Controls** or B to go back.
@@ -466,11 +469,17 @@ elsewhere.
 
 </details>
 
+### Controller emulation
+
+On the Legion Go 2, open **Controller emulation** to choose **Steam Controller**, **Xbox Elite**, **DualSense**, or **DualSense Edge**. **System default** uses the original InputPlumber target. The module shows the live target and which choices your InputPlumber build supports. Changing the gamepad briefly reconnects it. Xbox Elite has no gyro output.
+
+To create a game profile, open the module while the game is running. Select a controller in **Game profiles** and enable **Apply profile automatically**. The default controller returns when you quit the game. If **Steam Controller in Steam menus** is on, Steam Controller returns to the menus instead.
+
+For Steam remapping, enable PlayStation controller support in Steam's controller settings. **Refresh PlayStation detection in Steam** refreshes discovery for the virtual Sony controller on mode changes and resume. The manual refresh and the Steam controller-list status are available in the PlayStation section. Use the game's Steam Input override when it needs direct PlayStation input.
+
+With DualSense Edge active, Steam Input can map Y1 to left Fn, Y2 to left paddle, Y3 to right Fn and M3 to right paddle. The virtual Edge also reports gyro. Set its motion source in **Gyro & touchpad**.
+
 ### Gyro & touchpad
-
-On the Legion Go 2, open **Gyro & touchpad → Controller emulation** to choose **Steam Controller**, **Xbox Elite**, or **DualSense (PS5)**. **System default** hands the choice back to InputPlumber. The row shows which controller is active and the available options for your InputPlumber build.
-
-Changing the emulated controller briefly disconnects the gamepad. Change it before opening a game, or restart the game if it still lists the old controller. Xbox Elite does not expose gyro to games. The controller test can show physical inputs in all modes, while its Steam report is specific to Steam Controller mode.
 
 Choose the **Gyro source**: **Left controller**, **Right controller**, **Both controllers** or
 **System default**. The gyros are in the removable handles; Both averages them.

@@ -23,6 +23,7 @@ if PLUGIN_DIR not in sys.path:
 
 import battery_backend
 import controller_backend
+import emulation_backend
 import display_backend
 import fan_backend
 import remap_backend
@@ -43,7 +44,7 @@ from desktop_install import DesktopInstall
 from inputplumber_process import LostControllerRecovery
 from conflict_guard import installed_conflicts, CHECK_INTERVAL_S
 
-MODULE_NAMES = ('tdp', 'fan', 'vibration', 'display', 'wifi', 'rgb', 'remap', 'battery', 'controller')
+MODULE_NAMES = ('tdp', 'fan', 'vibration', 'display', 'wifi', 'rgb', 'remap', 'battery', 'controller', 'emulation')
 FIRMWARE_RPCS = frozenset({'firmware_get_status', 'firmware_check', 'firmware_download', 'firmware_install'})
 UPDATE_RPCS = frozenset({'updates_check', 'updates_download'}) | FIRMWARE_RPCS
 # Read-only and for any console: no module of its own, also during controller maintenance (it opens no
@@ -83,7 +84,7 @@ STARTING_STOP_WAIT_S = 2.0
 # about two minutes of retries, then the next start tries again.
 BAND_RESTORE_RETRY_S = 20.0
 BAND_RESTORE_ATTEMPTS = 6
-_ADVISORY_RPCS = frozenset({'set_panel_active', 'set_active_app', 'vibe_set_active_app'})  # Besides reads.
+_ADVISORY_RPCS = frozenset({'set_panel_active', 'set_active_app', 'vibe_set_active_app', 'emulation_report_app'})
 # Preconditions the backend checks before changing anything; the reply already tells the user why.
 _REFUSALS = frozenset({'unsupported_backend', 'unsupported_device', 'preflight_failed', 'no_wifi',
                        'backend_inactive', 'iwd_inactive', 'preference_disabled', 'managed_profile_not_active'})
@@ -175,7 +176,8 @@ def _logged_rpc(function, name):
 def _rpc_module(name):
     """The module that admits this RPC, None for module-less ones; a name with neither is a bug, not TDP."""
     for prefix, module in (('fan_', 'fan'), ('vibe_', 'vibration'), ('display_', 'display'), ('wifi_', 'wifi'),
-                           ('rgb_', 'rgb'), ('remap_', 'remap'), ('battery_', 'battery'), ('controller_', 'controller')):
+                           ('rgb_', 'rgb'), ('remap_', 'remap'), ('battery_', 'battery'), ('controller_', 'controller'),
+                           ('emulation_', 'emulation')):
         if name.startswith(prefix):
             return module
     if name.startswith('modules_') or name in UPDATE_RPCS or name in REPORT_RPCS:
@@ -387,6 +389,7 @@ class Plugin:
         self._rpc_locks = {name: asyncio.Lock() for name in MODULE_NAMES}
         # These calls share InputPlumber filters, profiles and HID diagnostics.
         self._rpc_locks['remap'] = self._rpc_locks['controller']
+        self._rpc_locks['emulation'] = self._rpc_locks['controller']
         self._rpc_jobs = set()
         self._controller_rpc_jobs = set()
         self._guard_scan = None
@@ -448,6 +451,7 @@ class Plugin:
         self._remap = remap_backend.Plugin()
         self._battery = battery_backend.Plugin()
         self._controller = controller_backend.Plugin()
+        self._emulation = emulation_backend.Plugin(self._controller)
 
     def _ensure_updates(self):
         if self._updates is not None:
@@ -1579,9 +1583,6 @@ class Plugin:
     async def controller_set_sleep_time(self, minutes):
         return await self._controller.set_sleep_time(minutes)
 
-    async def controller_set_emulation(self, mode):
-        return await self._controller.set_emulation(mode)
-
     async def controller_start_diagnostics(self):
         return await self._controller.start_diagnostics()
 
@@ -1590,3 +1591,27 @@ class Plugin:
 
     async def controller_stop_diagnostics(self, token):
         return await self._controller.stop_diagnostics(token)
+
+    async def emulation_get_status(self):
+        return await self._emulation.get_status()
+
+    async def emulation_set_default(self, mode):
+        return await self._emulation.set_default(mode)
+
+    async def emulation_set_profile(self, app, name, mode, enabled):
+        return await self._emulation.set_profile(app, name, mode, enabled)
+
+    async def emulation_delete_profile(self, app):
+        return await self._emulation.delete_profile(app)
+
+    async def emulation_set_steam_menu(self, enabled):
+        return await self._emulation.set_steam_menu(enabled)
+
+    async def emulation_set_steam_discovery(self, enabled):
+        return await self._emulation.set_steam_discovery(enabled)
+
+    async def emulation_report_app(self, app, name):
+        return await self._emulation.report_app(app, name)
+
+    async def emulation_refresh_steam_detection(self):
+        return await self._emulation.refresh_steam_detection()

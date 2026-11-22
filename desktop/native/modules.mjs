@@ -3,7 +3,7 @@
 
 // Key order is the menu and Manage Modules order.
 export const MODULE_LABELS = { tdp: "TDP", fan: "Fan Control", vibration: "Vibration", rgb: "Lighting",
-  remap: "Button mapping", controller: "Gyro & touchpad", battery: "Battery", display: "Display", wifi: "Wi-Fi" };
+  remap: "Button mapping", controller: "Gyro & touchpad", emulation: "Controller emulation", battery: "Battery", display: "Display", wifi: "Wi-Fi" };
 const MODULE_DESCRIPTIONS = {
   tdp: "Power limits and CPU settings. Off: Lenovo's default limits return.",
   fan: "Your own fan curve. Off: the fan returns to automatic.",
@@ -11,6 +11,7 @@ const MODULE_DESCRIPTIONS = {
   rgb: "Stick lights and power button light.",
   remap: "The two extra buttons on the left controller.",
   controller: "Gyro source and controller test.",
+  emulation: "Virtual controller and per-game profiles. Off restores the system controller.",
   battery: "Charge limit of about 80%.",
   display: "Games see the screen's real HDR brightness.",
   wifi: "Wi-Fi band preference.",

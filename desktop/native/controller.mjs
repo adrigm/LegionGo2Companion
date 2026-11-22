@@ -12,26 +12,21 @@ export const sourceNote = status => `Which controller's motion Steam uses. Syste
 /** The gyro source waits for InputPlumber, for another app to give the controller back, and for the controller test to end. */
 export const sourceLocked = (status, testing) => !status?.available || !!status.conflict || !!testing;
 
-export const EMULATION_TITLE = "Controller emulation";
-export const EMULATION_LABEL = "Emulated controller";
-const EMULATION_LABELS = {
-  system: "System default", steam: "Steam Controller", "xbox-elite": "Xbox Elite", ds5: "DualSense (PS5)",
+export const EMULATION_LABELS = {
+  system: "System default", steam: "Steam Controller", "xbox-elite": "Xbox Elite", ds5: "DualSense (PS5)", "ds5-edge": "DualSense Edge (PS5)",
 };
-export const emulationOptions = status => Object.keys(EMULATION_LABELS)
-  .filter(id => id === "system" || status?.emulation?.options.includes(id))
+export const emulationOptions = (status, saved) => Object.keys(EMULATION_LABELS)
+  .filter(id => id === "system" || id === saved || status?.options?.includes(id))
   .map(id => ({ id, label: EMULATION_LABELS[id] }));
-export const emulationValue = status => {
-  const value = status?.emulation;
-  return value?.selected === "system" ? "system" : value?.active || value?.selected || "system";
-};
+export const isPlayStation = mode => mode === "ds5" || mode === "ds5-edge";
+export const EDGE_BUTTONS = "Y1 → left Fn, Y2 → left paddle, Y3 → right Fn, M3 → right paddle.";
 export const emulationNote = status => {
-  const { active, selected, reason } = status?.emulation || {};
+  const { active, effective, reason } = status || {};
   if (reason) return reason;
-  const details = active === "xbox-elite" ? " Xbox Elite does not expose gyro to games."
-    : " Changing the controller briefly disconnects the gamepad.";
-  const saved = selected && selected !== "system" && selected !== active
-    ? ` Saved: ${EMULATION_LABELS[selected]}.` : "";
-  return active ? `Active: ${EMULATION_LABELS[active]}.${saved}${details}` : "";
+  if (!active) return "Waiting for InputPlumber.";
+  const pending = effective && effective !== "system" && effective !== active
+    ? ` Requested: ${EMULATION_LABELS[effective]}.` : "";
+  return `Active: ${EMULATION_LABELS[active]}.${pending}`;
 };
 
 const finite = value => typeof value === "number" && Number.isFinite(value);

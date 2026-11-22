@@ -119,7 +119,7 @@ class ModuleGateTests(unittest.IsolatedAsyncioTestCase):
                        'battery_get_controller_levels', 'controller_get_status']:
             with self.subTest(method=method), self.assertRaisesRegex(RuntimeError, 'disabled'):
                 await getattr(self.plugin, method)()
-        self.assertEqual(len((await self.plugin.get_version())['modules']), 9)
+        self.assertEqual(set((await self.plugin.get_version())['modules']), set(main.MODULE_NAMES))
 
     async def test_uninstall_retries_pending_cleanup_without_starting_module(self):
         resume = {'source': 'right'}
@@ -805,10 +805,8 @@ class WorkerDrainTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_controller_withdraws_after_close_without_restarting_monitor(self):
         c = types.SimpleNamespace(_unload=AsyncMock(), _release=lambda **kw: None, _release_sleep=lambda: None)
-        c._sync_emulation = unittest.mock.Mock()
         await module_control.withdraw('controller', c)
         c._unload.assert_awaited_once()
-        c._sync_emulation.assert_called_once_with(release=True)
 
     async def test_wifi_cleanup_keeps_saved_profiles(self):
         import wifi_backend

@@ -2,6 +2,13 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.0] - 2026-11-22
+
+- **Quick Access:** add an optional Companion tab in Steam's Quick Access Menu. The plugin remains available from Decky.
+- **Controller emulation:** move the selector into its own module in Decky and Desktop. Add DualSense Edge with gyro and four auxiliary inputs.
+- **Game profiles:** choose which controller Companion activates when each game starts. Closing the game restores the configured default or Steam menu mode.
+- **Steam detection:** show whether Steam reports a matching PlayStation controller and add manual and automatic refresh options.
+
 ## [2.4.4] - 2026-11-22
 
 ### 🐛 Fixed

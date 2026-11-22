@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Types of modules.mjs for the Decky panel (the Desktop app imports the module from QML).
-type Name = "tdp" | "fan" | "vibration" | "rgb" | "remap" | "controller" | "battery" | "display" | "wifi";
+type Name = "tdp" | "fan" | "vibration" | "rgb" | "remap" | "controller" | "emulation" | "battery" | "display" | "wifi";
 type Entry = { applicable?: boolean | null; enabled?: boolean; ready?: boolean; pending?: boolean; maintenance?: boolean; starting?: boolean; error?: string; note?: string };
 export const MODULE_LABELS: Record<Name, string>;
 export function moduleStartingText(entry?: Entry | null): string;

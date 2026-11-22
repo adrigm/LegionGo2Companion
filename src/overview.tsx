@@ -13,7 +13,7 @@ import { getControllerStatus, type ControllerStatus } from "./controller";
 import { rpc } from "./shared";
 import { moduleShown } from "../desktop/native/modules.mjs";
 
-export type ModuleKey = "tdp" | "fan" | "vibration" | "display" | "wifi" | "rgb" | "remap" | "battery" | "controller";
+export type ModuleKey = "tdp" | "fan" | "vibration" | "display" | "wifi" | "rgb" | "remap" | "battery" | "controller" | "emulation";
 export type ModuleStates = Partial<Record<ModuleKey, {enabled: boolean; applicable?: boolean | null; ready?: boolean; pending?: boolean; maintenance?: boolean; starting?: boolean; error?: string; note?: string}>>;
 export const EMPTY_MODULES: ModuleStates = {};
 export const moduleEnabled = (modules: ModuleStates, key: ModuleKey) => moduleShown(modules[key]) && modules[key]?.enabled !== false && modules[key]?.ready !== false && !modules[key]?.pending;

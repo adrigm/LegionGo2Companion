@@ -34,7 +34,7 @@ import decky
 from diagnostics import event, shown, transition
 from safe_settings import SettingsManager
 from inputplumber_process import (
-    DEVICE_PATH_RE, INTERFACE, SERVICE, SETTLE_S, ProcessWatch,
+    DEVICE_PATH_RE, INTERFACE, SERVICE, ProcessWatch,
     json_value as _json_value, run_busctl as _run_busctl,
 )
 import controller_imu
@@ -391,7 +391,8 @@ class Plugin:
         self._emulation_targets: list[str] = []
         self._emulation_candidate: tuple | None = None
         self._emulation_retry_at = 0.0
-        self._emulation_enabled = False
+        self._emulation_baseline: str | None = None
+        self._emulation_requested: str | None = None
 
     @staticmethod
     def _battery_result(sample: dict | None = None, reason: str = "") -> dict:
@@ -505,8 +506,7 @@ class Plugin:
                           "error": self._error, "physical": physical, "virtual": virtual,
                           "imu": imu,
                           "recovery_pending": bool(state["ownership"] and state["ownership"].get("pending")),
-                           "sleep": self._sleep_status(),
-                           "emulation": self._emulation_status(physical, device)}
+                           "sleep": self._sleep_status()}
                 self._status_cache = (now, copy.deepcopy(result))
             with self._capture_lock:
                 result["diagnostics_active"] = bool(self._capture and self._capture["active"])
@@ -745,10 +745,8 @@ class Plugin:
             return {"selected": selected, "active": None, "options": [], "reason": shown(exc)}
         return {"selected": selected, "active": emulation.GAMEPADS[active], "options": options, "reason": ""}
 
-    def _set_emulation(self, mode: str) -> None:
+    def _set_emulation(self, mode: str, *, apply=True) -> str | None:
         with self._operation:
-            if self._closed:
-                raise ControllerError("Controller support is stopped.")
             with self._capture_lock:
                 if self._capture and self._capture["active"]:
                     raise ControllerError("Stop the controller test before changing emulation.")
@@ -757,7 +755,7 @@ class Plugin:
             current = emulation.targets(device)
             active = emulation.gamepad(current)
             saved = _emulation_choice()
-            baseline = saved["baseline"] if saved and saved["target"] == active else active
+            baseline = self._emulation_baseline or (saved["baseline"] if saved else active)
             target = baseline if mode == "system" else emulation.modes(device).get(mode)
             if not target:
                 raise ControllerError("This InputPlumber build does not support the selected controller.")
@@ -765,30 +763,29 @@ class Plugin:
             # A Linux Deck target may already be the one this system uses for Steam.
             if mode != "system" and emulation.GAMEPADS[active] == mode:
                 target = active
-            emulation.switch(device, current, target)
+            if apply:
+                emulation.switch(device, current, target)
             try:
                 _save({"baseline": baseline, "target": target} if mode != "system" else None, "emulation")
             except Exception:
-                emulation.switch(device, emulation.targets(device), active)
+                if apply:
+                    emulation.switch(device, emulation.targets(device), active)
                 raise
-            self._emulation_owner = (device["generation"], device["path"]) if mode != "system" else None
-            self._emulation_targets = [target if kind == active else kind for kind in current]
-            self._emulation_enabled = mode != "system"
+            if apply:
+                self._emulation_owner = (device["generation"], device["path"]) if mode != "system" else None
+                self._emulation_targets = [target if kind == active else kind for kind in current]
+                self._emulation_baseline = baseline if mode != "system" else None
+                self._emulation_requested = target if mode != "system" else None
             self._emulation_candidate = None
             self._emulation_retry_at = 0.0
+            return target if apply else None
 
-    async def set_emulation(self, mode: str) -> dict:
-        if not isinstance(mode, str) or (mode != "system" and mode not in controller_emulation.MODES):
-            raise ValueError("Unknown controller emulation mode.")
-        await _offload(self._set_emulation, mode)
-        return await _offload(self._status, True)
-
-    def _sync_emulation(self, *, release=False, now=None, resumed=False) -> None:
+    def _sync_emulation(self, *, release=False, now=None, resumed=False, override=None) -> str | None:
         with self._operation:
-            if self._closed and not release:
-                return
             saved = _emulation_choice()
-            if not saved or _console() != "go2" or (release and not self._emulation_owner):
+            if _console() != "go2" or (release and not self._emulation_owner):
+                return
+            if not (saved or override or self._emulation_owner):
                 return
             emulation = controller_emulation
             now = time.monotonic() if now is None else now
@@ -800,29 +797,49 @@ class Plugin:
                 if release and not physical:
                     # The composite is gone. Its next instance will start with the system targets.
                     self._emulation_owner = None
+                    self._emulation_baseline = None
                     return
                 device = self._emulation_device(physical)
                 current = emulation.targets(device)
                 active = emulation.gamepad(current, allow_missing=True)
                 owner = (device["generation"], device["path"])
+                owned = self._emulation_owner == owner and bool(self._emulation_targets)
+                last_applied = emulation.gamepad(self._emulation_targets) if owned else None
+                baseline = self._emulation_baseline or (saved["baseline"] if saved else active)
+                if baseline is None:
+                    return
                 if release:
-                    if active == saved["target"] and self._emulation_owner == owner:
-                        emulation.switch(device, current, saved["baseline"])
-                    elif active is None and self._emulation_owner == owner and self._emulation_targets:
-                        emulation.recover(device, current, self._emulation_targets,
-                                          saved["baseline"], saved["baseline"])
+                    if owned and active == last_applied:
+                        emulation.switch(device, current, baseline)
+                    elif owned and active is None:
+                        emulation.recover(device, current, self._emulation_targets, baseline, baseline)
                     self._emulation_owner = None
                     self._emulation_targets = []
+                    self._emulation_baseline = None
+                    self._emulation_requested = None
                     return
-                if active == saved["target"]:
+                target = (emulation.modes(device).get(override) if override not in (None, "system")
+                          else baseline if override == "system" or not saved else saved["target"])
+                if target is None:
+                    target = saved["target"] if saved else baseline
+                managed = saved is not None or override is not None
+                if active == target:
+                    if not managed:
+                        self._emulation_owner = None
+                        self._emulation_baseline = None
+                        self._emulation_requested = None
+                        return active
                     self._emulation_owner = owner
                     self._emulation_targets = current
+                    self._emulation_baseline = baseline
+                    self._emulation_requested = target
                     self._emulation_candidate = None
-                    return
+                    return active
 
-                missing = active is None and owner == self._emulation_owner and bool(self._emulation_targets)
-                reset = active is not None and emulation.GAMEPADS[active] == emulation.GAMEPADS[saved["baseline"]]
-                if not (missing or reset):
+                missing = active is None and owned
+                reset = active is not None and emulation.GAMEPADS[active] == emulation.GAMEPADS[baseline]
+                changed = target != self._emulation_requested
+                if not (missing or reset or (owned and active == last_applied and changed)):
                     # An unrelated target or an unverified composite belongs to its current owner.
                     self._emulation_candidate = None
                     return
@@ -832,34 +849,31 @@ class Plugin:
                         return
                 # SteamOS can detach and reattach targets asynchronously. Confirm the
                 # same reset or absence on two ticks before sending another request.
-                candidate = (owner, tuple(sorted(current)))
+                candidate = (owner, tuple(sorted(current)), target)
                 previous, self._emulation_candidate = self._emulation_candidate, candidate
-                if candidate != previous or now < self._emulation_retry_at:
+                policy_change = changed and not missing and (owned or (override is not None and reset))
+                if (candidate != previous or now < self._emulation_retry_at) and not policy_change:
                     return
+                self._emulation_requested = target
                 self._emulation_retry_at = now + EMULATION_RETRY_SECONDS
-                if saved["target"] not in emulation.modes(device).values():
-                    return
                 if missing:
-                    emulation.recover(device, current, self._emulation_targets,
-                                      saved["target"], saved["baseline"])
+                    emulation.recover(device, current, self._emulation_targets, target, baseline)
                 else:
-                    emulation.switch(device, current, saved["target"])
+                    emulation.switch(device, current, target)
                 self._emulation_owner = owner
                 self._emulation_targets = emulation.targets(device)
+                self._emulation_baseline = baseline
                 self._emulation_candidate = None
                 self._status_cache = None
-                event("controller", "emulation_recovered", mode=saved["target"],
+                event("controller", "emulation_recovered", mode=target,
                       reason="missing_target" if missing else "system_target")
+                return target
             except (ControllerError, emulation.InputPlumberError) as exc:
                 if release:
                     raise
                 self._emulation_candidate = None
                 self._status_cache = None
                 transition("controller", "emulation_sync", False, level="warning", error=exc, outcome="deferred", initial=False)
-
-    @module_runtime.controller_operation('controller')
-    async def _emulation_pass(self, now: float, resumed: bool) -> None:
-        await _offload(self._sync_emulation, now=now, resumed=resumed)
 
     def _sleep_status(self) -> dict:
         # The pads' own value is not shown: the driver can report a stale cached one.
@@ -1106,23 +1120,14 @@ class Plugin:
         # Healthy devices and externally changed ownership stay at one minute.
         retry_delay = RECOVERY_RETRY_SECONDS
         next_check = now + (retry_delay if self._error and not self._conflict else CHECK_SECONDS)
-        emulation_resume_at = None
         self._sleep_due = now  # startup, an update or re-enabling: one check on the first tick
         while not self._closed:
             await asyncio.sleep(5)
             if module_runtime.is_paused('controller'):
                 continue
             now, resumed = time.monotonic(), resume()
-            if resumed:
-                emulation_resume_at = now + SETTLE_S
             if resumed or now >= self._sleep_due:
                 await self._sleep_check(now, resumed)
-            if self._emulation_enabled and (emulation_resume_at is None or now >= emulation_resume_at):
-                try:
-                    await self._emulation_pass(now, emulation_resume_at is not None)
-                except module_runtime.ControllerPaused:
-                    continue
-                emulation_resume_at = None
             service_exited = self._service_watch.consume_exit()
             if service_exited:
                 # Only advance the schedule. _select still verifies the actual
@@ -1167,9 +1172,6 @@ class Plugin:
             transition("controller", "managed_profile", "conflict" if self._conflict else "deferred",
                        level="warning", error=exc,
                        outcome="deferred", pending=not self._conflict)
-        self._emulation_enabled = (await _offload(_emulation_choice)) is not None
-        self._emulation_candidate = None
-        self._emulation_retry_at = 0.0
         self._ensure_watch()
 
     async def _unload(self) -> None:
@@ -1184,10 +1186,6 @@ class Plugin:
         # Closing our own read-only observers is permitted during maintenance;
         # this path never restores hardware or user intent.
         await module_runtime.complete(asyncio.to_thread(self._stop_capture))
-        try:
-            await _offload(self._sync_emulation, release=True)
-        except Exception as exc:
-            event('controller', 'emulation_restore_failed', level='warning', error=exc)
         try:
             await _offload(self._release, persist=False)
         except Exception as exc:

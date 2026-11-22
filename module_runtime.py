@@ -53,7 +53,7 @@ firmware_lock = _FirmwareLock()
 # (an attribute's reads, write and confirmation) so their commands never interleave.
 # Innermost but for firmware_lock: never wait here for another module's lock.
 controller_config_lock = threading.RLock()
-CONTROLLER_MODULES = frozenset({'controller', 'remap', 'rgb', 'vibration'})
+CONTROLLER_MODULES = frozenset({'controller', 'remap', 'rgb', 'vibration', 'emulation'})
 _controller_paused = False
 _controller_generation = 0
 _operation_generation = contextvars.ContextVar('controller_operation_generation', default=None)
