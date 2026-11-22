@@ -37,7 +37,7 @@ CONSOLES = {
     "Go 2 83N1": (GO2_Z2, True, "go", True),
     "Lenovo outside the family": (FOREIGN, False, None, True),
 }
-EVERYTHING = {"fan", "vibration", "display", "wifi", "rgb", "remap", "battery", "controller"}
+EVERYTHING = {"fan", "vibration", "display", "wifi", "rgb", "remap", "battery", "controller", "emulation"}
 EXPECTED = {  # TDP reports its own applicability (tdp_backend).
     "Go 1, 2025 controller firmware": {"vibration", "wifi", "rgb", "battery", "controller"},
     "Go 1, older controller firmware": {"wifi", "battery"},
