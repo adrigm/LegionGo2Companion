@@ -35,7 +35,8 @@ class Plugin:
         self._qam_closed_at = float("-inf")
         self._defer_until = 0.0
         self._deferred_at = None
-        self._steam_node = None
+        self._steam_nodes = ()
+        self._discovery_retry_at = None
 
     @staticmethod
     def applicable():
@@ -82,15 +83,22 @@ class Plugin:
         self._qam_seen_at = now
         return {}
 
-    def _refresh_steam(self, target):
-        node = controller_emulation.sony_hidraw(target)
-        if node is None or node == self._steam_node:
+    def _refresh_steam(self, target, now, resumed):
+        nodes = controller_emulation.sony_discovery_nodes(target)
+        changed = nodes != self._steam_nodes or resumed
+        if changed:
+            self._steam_nodes = nodes
+            self._discovery_retry_at = None
+        elif self._discovery_retry_at is None or now < self._discovery_retry_at:
             return
-        # Mark before re-announcing so a failure cannot cause a hotplug event every poll.
-        self._steam_node = node
+        if not nodes:
+            return
+        self._discovery_retry_at = None
         try:
-            controller_emulation.refresh_steam_detection(node)
+            controller_emulation.refresh_steam_detection(nodes)
         except controller_emulation.InputPlumberError as exc:
+            if changed:
+                self._discovery_retry_at = now + 10.0
             event("emulation", "steam_detection_refresh_failed", level="warning", error=exc, repeat=60)
 
     def _tick(self, now, resumed):
@@ -99,7 +107,7 @@ class Plugin:
                 return
             self._deferred_at = None
             target = self._controller._sync_emulation(now=now, resumed=resumed)
-            self._refresh_steam(target)
+            self._refresh_steam(target, now, resumed)
             return True
 
     @module_runtime.controller_operation("emulation")
@@ -135,7 +143,8 @@ class Plugin:
         self._qam_seen_at = self._qam_closed_at = float("-inf")
         self._defer_until = 0.0
         self._deferred_at = None
-        self._steam_node = None
+        self._steam_nodes = ()
+        self._discovery_retry_at = None
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)

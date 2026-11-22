@@ -63,34 +63,36 @@ def modes(device: dict) -> dict[str, str]:
     if "steam" not in choices and "deck" in supported:
         choices["steam"] = "deck"
     for mode in SONY_PRODUCTS:
-        # Use wired reports for games that require a USB DualSense. Older InputPlumber
-        # versions expose the same USB target without the -usb suffix.
-        if f"{mode}-usb" in supported:
+        # The standard ds5 and ds5-edge targets already use USB reports.
+        if mode not in choices and f"{mode}-usb" in supported:
             choices[mode] = f"{mode}-usb"
     return choices
 
 
-def sony_hidraw(target: str | None) -> Path | None:
+def sony_discovery_nodes(target: str | None) -> tuple[Path, ...]:
     product = SONY_PRODUCTS.get(GAMEPADS.get(target))
     if product is None or not UHID_ROOT.is_dir():
-        return None
+        return ()
     identity = re.compile(rf"000[35]:054C:{product}\.[0-9A-F]+", re.IGNORECASE)
-    nodes = []
-    for device in UHID_ROOT.iterdir():
-        if not identity.fullmatch(device.name) or device.is_symlink():
-            continue
-        nodes.extend(node for node in (device / "hidraw").glob("hidraw[0-9]*")
-                     if re.fullmatch(r"hidraw[0-9]+", node.name) and node.is_dir() and not node.is_symlink())
-    # If HHD or another provider has a second Sony target, the node is ambiguous.
-    return nodes[0] if len(nodes) == 1 else None
+    devices = [device for device in UHID_ROOT.iterdir()
+               if identity.fullmatch(device.name) and device.is_dir() and not device.is_symlink()]
+    if len(devices) != 1:
+        return ()
+    device = devices[0]
+    hidraw = sorted(node for node in device.glob("hidraw/hidraw*")
+                    if re.fullmatch(r"hidraw[0-9]+", node.name) and node.is_dir() and not node.is_symlink())
+    events = sorted(node for node in device.glob("input/input*/event*")
+                    if re.fullmatch(r"event[0-9]+", node.name) and node.is_dir() and not node.is_symlink())
+    return tuple(hidraw + events)
 
 
-def refresh_steam_detection(node: Path) -> None:
-    # Only replay the HID interface Steam uses for PlayStation discovery. The
-    # evdev gamepad remains attached and other devices receive no hotplug event.
+def refresh_steam_detection(nodes: tuple[Path, ...]) -> None:
+    # An empty udevadm trigger would enumerate devices outside this controller.
+    if not nodes:
+        return
     try:
-        result = run(["/usr/bin/udevadm", "trigger", "--action=change", "--settle", str(node)],
-                     3.0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = run(["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)],
+                     5.0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise InputPlumberError("Could not refresh Steam controller discovery.") from exc
     if result.returncode:

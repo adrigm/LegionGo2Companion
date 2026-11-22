@@ -24,25 +24,42 @@ BASE = ["deck-uhid", "mouse", "keyboard", "touchpad"]
 
 
 class TargetTests(unittest.TestCase):
-    def test_sony_modes_prefer_usb_with_a_legacy_fallback(self):
+    def test_sony_modes_use_the_original_target_or_its_wired_alias(self):
         with patch.object(emulation, "json_value",
-                          return_value=["deck", "ds5", "ds5-edge", "ds5-edge-usb", "ds5-bt"]):
+                          return_value=["deck", "ds5", "ds5-usb", "ds5-edge-usb", "ds5-bt"]):
             self.assertEqual(emulation.modes(DEVICE),
                              {"steam": "deck", "ds5": "ds5", "ds5-edge": "ds5-edge-usb"})
 
     @unittest.skipUnless(os.name == "posix", "Linux sysfs names require colons")
-    def test_steam_discovery_is_scoped_to_the_virtual_sony_hidraw_node(self):
+    def test_steam_discovery_includes_hidraw_and_input_events_of_one_virtual_sony_pad(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             wired = root / "0003:054C:0CE6.0001/hidraw/hidraw3"
             wired.mkdir(parents=True)
+            gamepad = wired.parents[1] / "input/input21/event17"
+            touchpad = wired.parents[1] / "input/input22/event18"
+            edge = root / "0003:054C:0DF2.0004/input/input24/event20"
+            edge.mkdir(parents=True)
             (root / "0003:17EF:61EB.0002/hidraw/hidraw4").mkdir(parents=True)
             with patch.object(emulation, "UHID_ROOT", root):
-                self.assertEqual(emulation.sony_hidraw("ds5"), wired)
-                self.assertIsNone(emulation.sony_hidraw("ds5-edge"))
-                self.assertIsNone(emulation.sony_hidraw("xbox-elite"))
+                self.assertEqual(emulation.sony_discovery_nodes("ds5"), (wired,))
+                gamepad.mkdir(parents=True)
+                touchpad.mkdir(parents=True)
+                self.assertEqual(emulation.sony_discovery_nodes("ds5-usb"), (wired, gamepad, touchpad))
+                self.assertEqual(emulation.sony_discovery_nodes("ds5-edge"), (edge,))
+                self.assertEqual(emulation.sony_discovery_nodes("xbox-elite"), ())
                 (root / "0005:054C:0CE6.0003/hidraw/hidraw5").mkdir(parents=True)
-                self.assertIsNone(emulation.sony_hidraw("ds5"))
+                self.assertEqual(emulation.sony_discovery_nodes("ds5"), ())
+
+    def test_discovery_never_triggers_udev_without_explicit_nodes(self):
+        with patch.object(emulation, "run") as run:
+            emulation.refresh_steam_detection(())
+            run.assert_not_called()
+            run.return_value.returncode = 0
+            nodes = (Path("hidraw/hidraw3"), Path("input/input21/event17"))
+            emulation.refresh_steam_detection(nodes)
+            self.assertEqual(run.call_args.args[0],
+                             ["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)])
 
     def test_queries_only_the_discovered_service_and_reads_scalar_target_types(self):
         path = "/org/shadowblip/InputPlumber/devices/target/gamepad0"
@@ -213,7 +230,7 @@ class EmulationPreferenceTests(unittest.TestCase):
         self.plugin._set_emulation("ds5")
         watcher = emulation_backend.Plugin(self.plugin)
         watcher._running = True
-        with (patch.object(emulation, "sony_hidraw", return_value=Path("/virtual/0003:054C:0CE6.1/hidraw/hidraw0")) as node,
+        with (patch.object(emulation, "sony_discovery_nodes", return_value=(Path("hidraw/hidraw0"),)) as node,
               patch.object(emulation, "refresh_steam_detection") as refresh):
             with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: 10)):
                 asyncio.run(watcher.report_qam(True))
@@ -226,8 +243,21 @@ class EmulationPreferenceTests(unittest.TestCase):
             watcher._tick(14, False)
             watcher._tick(16, False)
             refresh.assert_called_once_with(node.return_value)
-            node.return_value = Path("/virtual/0003:054C:0CE6.2/hidraw/hidraw0")
-            watcher._tick(20, True)
+            node.return_value += (Path("input/input3/event8"),)
+            watcher._tick(18, False)
+            watcher._tick(20, False)
+            self.assertEqual(refresh.call_count, 2)
+            self.assertEqual(refresh.call_args.args, (node.return_value,))
+            watcher._tick(24, True)
+            watcher._tick(26, False)
+            self.assertEqual(refresh.call_count, 3)
+
+    def test_transient_udev_failure_retries_once_after_a_delay(self):
+        watcher = emulation_backend.Plugin(self.plugin)
+        with (patch.object(emulation, "sony_discovery_nodes", return_value=(Path("input/input3/event8"),)),
+              patch.object(emulation, "refresh_steam_detection", side_effect=emulation.InputPlumberError("timeout")) as refresh):
+            for now in (10, 12, 18, 20, 22, 60):
+                watcher._refresh_steam("ds5", now, False)
             self.assertEqual(refresh.call_count, 2)
 
     def test_default_change_waits_for_a_fresh_qam_close_even_if_the_ui_stops_reporting(self):

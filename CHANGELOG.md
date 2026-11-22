@@ -2,6 +2,10 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.5] - 2026-11-22
+
+- Restore Steam discovery for DualSense and DualSense Edge by announcing their HID and input event interfaces together after Quick Access closes. Refresh when a new interface appears or the handheld wakes.
+
 ## [2.5.4] - 2026-11-22
 
 - **Controller emulation:** keep one controller selected across Steam menus and games. Remove emulation profiles and the PlayStation diagnostics from Decky and Desktop.
