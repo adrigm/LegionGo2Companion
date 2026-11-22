@@ -2,6 +2,12 @@
 
 All notable changes to Legion Go 2 Companion, newest first.
 
+## [2.5.8] - 2026-11-22
+
+- Follow Steam's game lifetime and controller list notifications. Identify the Legion controller by its physical InputPlumber source even when gyro filters are unavailable.
+- Leave a visible controller attached on game exit. If reconnecting the selected model still leaves Steam without a controller, use a Steam Controller for menu navigation (Xbox Elite when Steam Controller is the selected model). Restore the saved model on the next game launch.
+- In system-default mode, recover the observed gamepad on the same Legion composite without saving an emulation preference.
+
 ## [2.5.7] - 2026-11-22
 
 - Read Steam's connected controller list in the menu. If it stays empty after leaving a game, unplug and reconnect the selected virtual gamepad on the Legion composite. Keep its auxiliary devices attached and check whether Steam sees a controller again.

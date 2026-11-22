@@ -48,4 +48,33 @@ run(async () => {
   await settle();
   assert.deepEqual(lifecycle.calls.at(-1).args, [false, false, null]);
   stop();
+
+  let appChanged, listChanged;
+  let menu = 0;
+  const native = mount('emulation.tsx', { ui: {
+    Router: { IsAnyAppRunning: () => true, RunningApps: [{ appid: 2322010 }],
+      GetFocusedWindowInstance: () => ({ MenuStore: { GetOpenSideMenu: () => menu } }) },
+    findModuleExport: () => ({ GetControllers: () => [{}], GetController() {} }),
+  }, window: { SteamClient: {
+    GameSessions: { RegisterForAppLifetimeNotifications: fn => { appChanged = fn; return () => {}; } },
+    Input: { RegisterForControllerListChanges: fn => { listChanged = fn; return () => {}; } },
+  } } });
+  const off = native.exports.startEmulationWatcher();
+  await settle();
+  const session = (instance, running) => appChanged({ unAppID: 2322010, nInstanceID: instance, bRunning: running });
+  session(1, true);
+  session(2, true);
+  listChanged([]);
+  session(1, false);
+  await settle();
+  assert.deepEqual(native.calls.at(-1).args, [false, true, null]);
+  menu = 2;
+  session(2, false);
+  await settle();
+  assert.deepEqual(native.calls.at(-1).args, [true, false, false]);
+  menu = 0;
+  listChanged([{}]);
+  await settle();
+  assert.deepEqual(native.calls.at(-1).args, [false, false, true]);
+  off();
 });

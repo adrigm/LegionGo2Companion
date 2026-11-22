@@ -60,9 +60,22 @@ class TargetTests(unittest.TestCase):
             emulation.refresh_steam_detection(nodes)
             self.assertEqual(run.call_args.args[0],
                              ["/usr/bin/udevadm", "trigger", "--action=change", "--settle", *map(str, nodes)])
-            emulation.refresh_steam_detection(nodes, reconnect=True)
-            self.assertEqual(run.call_args.args[0],
-                             ["/usr/bin/udevadm", "trigger", "--action=add", "--settle", *map(str, nodes)])
+
+    def test_emulation_matches_physical_source_without_any_gyro_properties(self):
+        plugin = backend.Plugin()
+        physical = {"path": "/dev/hidraw4", "sysfs": "legion"}
+        own, other = DEVICE["path"], DEVICE["path"] + "1"
+        def get(args):
+            if args[0] == "call":
+                return [DEVICE["service_owner"]]
+            self.assertEqual(args[1], DEVICE["service_owner"])
+            if args[-1] == "Name":
+                return "Lenovo Legion Go 2"
+            self.assertEqual(args[-1], "SourceDevicePaths")
+            return [physical["path"]] if args[2] == own else ["/dev/hidraw5"]
+        with (patch.object(backend, "_console", return_value="go2"), patch.object(backend, "_json_value", side_effect=get),
+              patch.object(backend, "_run_busctl", return_value=other + "\n" + own)):
+            self.assertEqual(plugin._emulation_device(physical), DEVICE)
 
     def test_queries_only_the_discovered_service_and_reads_scalar_target_types(self):
         path = "/org/shadowblip/InputPlumber/devices/target/gamepad0"
@@ -221,14 +234,14 @@ class EmulationPreferenceTests(unittest.TestCase):
             self.assertEqual(self.live, ["ds5", "keyboard"])
             self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
 
-    def test_menu_reannounces_existing_sony_pad_once_without_switching_it(self):
+    def test_exit_with_visible_controller_leaves_existing_sony_pad_alone(self):
         self.plugin._set_emulation("ds5-edge")
         watcher = emulation_backend.Plugin(self.plugin)
         watcher._running = True
         nodes = (Path("hidraw/hidraw4"), Path("input/input3/event8"))
         def report(now, qam, running):
             with patch.object(emulation_backend, "time", types.SimpleNamespace(monotonic=lambda: now)):
-                asyncio.run(watcher.report_qam(qam, running))
+                asyncio.run(watcher.report_qam(qam, running, True))
         with (patch.object(emulation, "sony_discovery_nodes", return_value=nodes),
               patch.object(emulation, "refresh_steam_detection") as refresh,
               patch.object(emulation, "switch") as switch):
@@ -244,8 +257,7 @@ class EmulationPreferenceTests(unittest.TestCase):
             watcher._tick(16, False)
             report(17, False, False)
             watcher._tick(18, False)
-            self.assertEqual(refresh.call_count, 2)
-            refresh.assert_called_with(nodes, reconnect=True)
+            refresh.assert_called_once_with(nodes)
             switch.assert_not_called()
 
     def test_steam_empty_after_exit_requires_a_real_unplug_and_replug(self):
@@ -276,11 +288,55 @@ class EmulationPreferenceTests(unittest.TestCase):
             sample(22, False, False)
             self.assertEqual(writes, [BASE[1:], selected])
             self.assertEqual(checks, [True])
-            for now in range(25, 100, 3):
+            for now in (25, 28, 31):
                 sample(now, False, False)
             self.assertEqual(len(writes), 2)
-            sample(101, False, True)
+            sample(34, False, True)
             self.assertEqual(self.state.committed["emulation"]["target"], "ds5")
+
+    def test_failed_reconnect_uses_steam_in_menu_then_restores_saved_edge_on_launch(self):
+        self.plugin._set_emulation("ds5-edge")
+        watcher = emulation_backend.Plugin(self.plugin)
+        watcher._running = True
+        clock = types.SimpleNamespace(monotonic=lambda: 0)
+        def sample(now, game, connected):
+            clock.monotonic = lambda: now
+            asyncio.run(watcher.report_qam(False, game, connected))
+            watcher._tick(now, False)
+        with (patch.object(emulation_backend, "time", clock), patch.object(emulation, "reconnect") as reconnect,
+              patch.object(watcher, "_tick_async", new=AsyncMock(side_effect=watcher._tick)) as immediate):
+            sample(1, True, None)
+            for now in range(4, 23, 3):
+                sample(now, False, False)
+            reconnect.assert_called_once()
+            self.assertEqual(self.live, BASE)
+            self.assertEqual(self.state.committed["emulation"]["target"], "ds5-edge")
+            for now in range(25, 45, 3):
+                sample(now, False, True)
+            self.assertEqual(self.live, BASE)
+            sample(46, True, None)
+            immediate.assert_awaited_once()
+            self.assertEqual(self.live, ["ds5-edge", *BASE[1:]])
+
+    def test_exit_without_roster_reconnects_once_but_never_changes_model(self):
+        self.plugin._set_emulation("xbox-elite")
+        watcher = emulation_backend.Plugin(self.plugin)
+        watcher._running = True
+        with (patch.object(emulation_backend, "time") as clock, patch.object(emulation, "reconnect") as reconnect):
+            for now in range(1, 55, 3):
+                clock.monotonic.return_value = now
+                asyncio.run(watcher.report_qam(False, now == 1, None))
+                watcher._tick(now, False)
+            reconnect.assert_called_once()
+            self.assertEqual(self.live[0], "xbox-elite")
+
+    def test_system_default_recovers_missing_observed_target_without_saving_selection(self):
+        self.plugin._sync_emulation(observe_system=True)
+        self.live = BASE[1:]
+        with patch.object(emulation, "_set_targets", side_effect=lambda _, kinds: self.live.__setitem__(slice(None), kinds)):
+            self.plugin._sync_emulation(now=30, repair_menu=True)
+        self.assertCountEqual(self.live, BASE)
+        self.assertIsNone(backend._emulation_choice())
 
     def test_stale_or_unavailable_steam_roster_cannot_disconnect_a_pad(self):
         self.plugin._set_emulation("xbox-elite")
@@ -349,7 +405,7 @@ class EmulationPreferenceTests(unittest.TestCase):
             refresh.assert_not_called()
             watcher._tick(14, False)
             watcher._tick(16, False)
-            refresh.assert_called_once_with(node.return_value, reconnect=False)
+            refresh.assert_called_once_with(node.return_value)
             node.return_value += (Path("input/input3/event8"),)
             watcher._tick(18, False)
             watcher._tick(20, False)

@@ -16,10 +16,23 @@ const isControllerStore = (value: unknown): value is ControllerStore => {
     typeof store.GetController === "function";
 };
 
-function gameRunning(): boolean | null {
+function gameRunning(active: Map<number, Set<number>>, ended: Set<number>, lastLifetimeAt: number): boolean | null {
   try {
     const router = Router as typeof Router & { IsAnyAppRunning?(): boolean };
-    if (typeof router?.IsAnyAppRunning === "function") return router.IsAnyAppRunning();
+    const running = typeof router?.IsAnyAppRunning === "function" ? router.IsAnyAppRunning() : null;
+    if (active.size) {
+      if (running !== false || Date.now() - lastLifetimeAt < 12000) return true;
+      active.clear(); // A missed end notification must not suppress menu recovery indefinitely.
+    }
+    if (running === false && Date.now() - lastLifetimeAt >= 12000) ended.clear();
+    if (ended.size) {
+      const apps = router?.RunningApps;
+      if (Array.isArray(apps)) return apps.some(app => !ended.has(Number(app.appid)));
+      const id = Number(router?.MainRunningApp?.appid);
+      if (id) return !ended.has(id);
+      return false;
+    }
+    if (running !== null) return running;
     if (router && "MainRunningApp" in router) return !!router.MainRunningApp?.appid;
   } catch { /* SteamUI can be between instances. */ }
   return null;
@@ -27,6 +40,15 @@ function gameRunning(): boolean | null {
 
 const visibleQamViews = new Set<symbol>();
 let publishQam: (() => void) | undefined;
+
+function qamOpen(): boolean {
+  try {
+    const instance = Router?.GetFocusedWindowInstance?.() ?? Router?.WindowStore?.GamepadUIMainWindowInstance;
+    const menu = instance?.MenuStore?.GetOpenSideMenu?.();
+    if (typeof menu === "number") return menu === 2; // Steam's SideMenu.QuickAccess
+  } catch { /* Use Decky's mounted views while the Steam window is unavailable. */ }
+  return visibleQamViews.size > 0;
+}
 
 export function useEmulationQamVisibility(visible: boolean) {
   useEffect(() => {
@@ -40,17 +62,16 @@ export function useEmulationQamVisibility(visible: boolean) {
 
 export function startEmulationWatcher() {
   let pending = false;
+  let dirty = false;
   let stopped = false;
   let store: ControllerStore | undefined;
   let nextLookup = 0;
   let nativeList: boolean | null = null;
-  let unregister: SteamUnregister | undefined;
-  try {
-    unregister = window.SteamClient?.Input?.RegisterForControllerListChanges?.(list => {
-      nativeList = Array.isArray(list) ? list.length > 0 : null;
-    });
-  } catch { /* The SteamUI store also works on clients without this callback. */ }
+  const sessions = new Map<number, Set<number>>();
+  const ended = new Set<number>();
+  let lastLifetimeAt = 0;
   const connected = () => {
+    if (nativeList !== null) return nativeList;
     try {
       if (!store && Date.now() >= nextLookup) {
         nextLookup = Date.now() + 30000;
@@ -62,28 +83,56 @@ export function startEmulationWatcher() {
     return nativeList;
   };
   const publish = async () => {
-    if (pending || stopped) return;
-    const open = visibleQamViews.size > 0;
+    if (stopped) return;
+    if (pending) { dirty = true; return; }
+    dirty = false;
     pending = true;
     try {
-      const inGame = gameRunning();
-      await reportQam(open, inGame, inGame === false ? connected() : null);
+      const inGame = gameRunning(sessions, ended, lastLifetimeAt);
+      await reportQam(qamOpen(), inGame, inGame === false ? connected() : null);
     } catch {
       // The heartbeat retries after Decky reconnects.
     } finally {
       pending = false;
-      if (open !== (visibleQamViews.size > 0)) void publish();
+      if (dirty) void publish();
     }
   };
   const notify = () => void publish();
+  const subscriptions: (SteamUnregister | undefined)[] = [];
+  try {
+    subscriptions.push(window.SteamClient?.Input?.RegisterForControllerListChanges?.(list => {
+      nativeList = Array.isArray(list) ? list.length > 0 : null;
+      notify();
+    }));
+  } catch { /* Older clients only expose the SteamUI store. */ }
+  try {
+    subscriptions.push(window.SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(event => {
+      if (!event.unAppID || typeof event.bRunning !== "boolean") return;
+      const id = event.unAppID;
+      lastLifetimeAt = Date.now();
+      if (event.bRunning) {
+        ended.delete(id);
+        const instances = sessions.get(id) ?? new Set<number>();
+        instances.add(event.nInstanceID);
+        sessions.set(id, instances);
+      } else {
+        const instances = sessions.get(id);
+        instances?.delete(event.nInstanceID);
+        if (!instances?.size) { sessions.delete(id); ended.add(id); }
+      }
+      notify();
+    }));
+  } catch { /* The heartbeat still samples the running applications. */ }
   publishQam = notify;
   const heartbeat = setInterval(notify, 3000);
   notify();
   return () => {
     stopped = true;
     clearInterval(heartbeat);
-    if (typeof unregister === "function") unregister();
-    else unregister?.unregister();
+    for (const sub of subscriptions) {
+      if (typeof sub === "function") sub();
+      else sub?.unregister();
+    }
     if (publishQam === notify) publishQam = undefined;
   };
 }

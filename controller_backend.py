@@ -397,6 +397,7 @@ class Plugin:
         self._emulation_retry_at = 0.0
         self._emulation_baseline: str | None = None
         self._emulation_requested: str | None = None
+        self._system_gamepad = None
 
     @staticmethod
     def _battery_result(sample: dict | None = None, reason: str = "") -> dict:
@@ -731,7 +732,29 @@ class Plugin:
         physical = physical or _hid_inventory()[0]
         if not physical:
             raise ControllerError("The Legion Go 2 controller is unavailable.")
-        return _discover(physical, require_exclusive=False)
+        # SourceDevicePaths identifies the physical input even when the current
+        # target/profile exposes no filterable gyro events. Pin all reads and
+        # subsequent writes to the same InputPlumber instance.
+        owner = _json_value(["call", "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                             "org.freedesktop.DBus", "GetNameOwner", "s", SERVICE])
+        if not (isinstance(owner, list) and len(owner) == 1 and isinstance(owner[0], str)
+                and controller_emulation.OWNER.fullmatch(owner[0])):
+            raise ControllerError("InputPlumber service identity could not be verified.")
+        service = owner[0]
+        tree = _run_busctl(["tree", service, "--list", "--no-pager"])
+        matches = []
+        for path in map(str.strip, tree.splitlines()):
+            if not DEVICE_PATH_RE.fullmatch(path):
+                continue
+            read = ["get-property", service, path, INTERFACE]
+            if _json_value([*read, "Name"]) != INPUTPLUMBER_NAMES["go2"]:
+                continue
+            sources = _json_value([*read, "SourceDevicePaths"])
+            if isinstance(sources, list) and physical["path"] in sources:
+                matches.append(path)
+        if len(matches) != 1:
+            raise ControllerError("A single supported InputPlumber controller could not be identified.")
+        return {"path": matches[0], "service_owner": service, "generation": physical["sysfs"] + "|" + service}
 
     def _emulation_status(self, physical, device) -> dict | None:
         if _console() != "go2":
@@ -782,31 +805,48 @@ class Plugin:
                 self._emulation_requested = target if mode != "system" else None
             self._emulation_candidate = None
             self._emulation_retry_at = 0.0
+            self._system_gamepad = None
             return target if apply else None
 
-    def _reconnect_emulation(self, target, still_missing):
+    def _reconnect_emulation(self, target, still_missing, *, fallback=False):
         with self._operation:
             with self._capture_lock:
                 if self._capture and self._capture["active"]:
                     return False
             saved = _emulation_choice()
-            if not saved or saved["target"] != target:
+            if saved and saved["target"] != target:
+                return False
+            if not saved and (fallback or not self._system_gamepad):
                 return False
             device = self._emulation_device()
-            if self._emulation_owner != (device["generation"], device["path"]):
+            owner = (device["generation"], device["path"])
+            expected_owner = self._emulation_owner if saved else self._system_gamepad[0]
+            if expected_owner != owner:
                 return False
             current = controller_emulation.targets(device)
             if controller_emulation.gamepad(current, allow_missing=True) != target or not still_missing():
                 return False
-            controller_emulation.reconnect(device, current, saved["baseline"])
-            return True
+            if not fallback:
+                controller_emulation.reconnect(device, current, saved["baseline"] if saved else target)
+                return target
+            choices = controller_emulation.modes(device)
+            mode = "xbox-elite" if controller_emulation.GAMEPADS[target] == "steam" else "steam"
+            alternate = choices.get(mode)
+            if not alternate or not still_missing():
+                return False
+            controller_emulation.switch(device, current, alternate)
+            self._emulation_targets = [alternate if item == target else item for item in current]
+            self._emulation_requested = alternate
+            return alternate
 
-    def _sync_emulation(self, *, release=False, now=None, resumed=False, game_exited=False) -> str | None:
+    def _sync_emulation(self, *, release=False, now=None, resumed=False, game_exited=False,
+                        menu_override=None, repair_menu=False, observe_system=False) -> str | None:
         with self._operation:
             saved = _emulation_choice()
             if _console() != "go2" or (release and not self._emulation_owner):
                 return
-            if not (saved or self._emulation_owner):
+            unmanaged = not (saved or self._emulation_owner)
+            if unmanaged and not repair_menu and not (observe_system and self._system_gamepad is None):
                 return
             emulation = controller_emulation
             now = time.monotonic() if now is None else now
@@ -824,6 +864,20 @@ class Plugin:
                 current = emulation.targets(device)
                 active = emulation.gamepad(current, allow_missing=True)
                 owner = (device["generation"], device["path"])
+                if unmanaged:
+                    if active:
+                        self._system_gamepad = (owner, current)
+                        return active
+                    if repair_menu and self._system_gamepad and self._system_gamepad[0] == owner:
+                        previous = self._system_gamepad[1]
+                        pad = emulation.gamepad(previous)
+                        with self._capture_lock:
+                            if self._capture and self._capture["active"]:
+                                return
+                        if now >= self._emulation_retry_at:
+                            self._emulation_retry_at = now + EMULATION_RETRY_SECONDS
+                            emulation.recover(device, current, previous, pad, pad)
+                    return
                 owned = self._emulation_owner == owner and bool(self._emulation_targets)
                 last_applied = emulation.gamepad(self._emulation_targets) if owned else None
                 baseline = self._emulation_baseline or (saved["baseline"] if saved else active)
@@ -840,6 +894,10 @@ class Plugin:
                     self._emulation_requested = None
                     return
                 target = saved["target"] if saved else baseline
+                # A menu rescue is tied to the selection it replaced. It never
+                # reaches disk and a new preference invalidates it immediately.
+                if menu_override and saved and menu_override[0] == target:
+                    target = menu_override[1]
                 if active == target:
                     if saved is None:
                         self._emulation_owner = None
@@ -857,6 +915,10 @@ class Plugin:
                 # A recreated composite can have no pad before we have ever owned it.
                 missing = active is None and (owned or saved is not None)
                 reset = active is not None and emulation.GAMEPADS[active] == emulation.GAMEPADS[baseline]
+                if repair_menu and owned and saved and active is not None:
+                    # SteamOS may substitute a different supported controller on
+                    # exit. Repair it only after Steam confirms its roster is empty.
+                    reset = True
                 changed = target != self._emulation_requested
                 if not (missing or reset or (owned and active == last_applied and changed)):
                     # An unrelated target or an unverified composite belongs to its current owner.

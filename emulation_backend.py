@@ -40,16 +40,18 @@ class Plugin:
         self._deferred_at = None
         self._steam_nodes = ()
         self._discovery_retry_at = None
-        self._discovery_reconnect = False
         self._game_running = False
         self._last_exit = None
         self._handled_exit = None
-        self._menu_add_pending = False
+        self._unverified_exit = None
         self._empty_since = None
         self._empty_checked = False
         self._reconnected_loss = None
+        self._reconnected_exit = None
         self._reconnected_at = float("-inf")
         self._awaiting_steam = False
+        self._menu_override = None
+        self._fallback_loss = None
 
     @staticmethod
     def applicable():
@@ -75,6 +77,7 @@ class Plugin:
             now = time.monotonic()
             apply = not after_qam and not self._qam_blocks_switch(now)
             self._controller._set_emulation(mode, apply=apply)
+            self._menu_override = None
             if after_qam:
                 # Native dropdowns temporarily report QAM as hidden while committing a selection.
                 self._defer_until = now + QAM_SELECTION_GRACE_SECONDS
@@ -90,17 +93,23 @@ class Plugin:
         if type(opened) is not bool or any(v is not None and type(v) is not bool for v in (game_running, connected)):
             raise ValueError("Invalid Quick Access state.")
         now = time.monotonic()
+        if now - self._qam_seen_at >= QAM_LEASE_SECONDS:
+            self._unverified_exit = None
         if game_running is not False or connected is not False or now - self._qam_seen_at >= QAM_LEASE_SECONDS:
             self._empty_since = None
             self._empty_checked = False
         if game_running is False and connected is False and self._empty_since is None:
             self._empty_since = now
+        started = game_running is True and not self._game_running
         if game_running is not None:
-            if self._game_running and not game_running:
+            if self._game_running and not game_running and now - self._qam_seen_at < QAM_LEASE_SECONDS:
                 self._last_exit = now
+                self._unverified_exit = now
             elif game_running:
                 self._last_exit = None
             self._game_running = game_running
+        if connected is not None or game_running is not False:
+            self._unverified_exit = None
         if not opened and self._qam_open:
             self._qam_closed_at = now
         self._qam_open = opened
@@ -114,6 +123,13 @@ class Plugin:
             if connected or now - self._reconnected_at >= QAM_LEASE_SECONDS:
                 self._awaiting_steam = False
                 event("emulation", "steam_menu_reconnect_result", outcome="visible" if connected else "still_missing")
+        if started and self._menu_override and self._running:
+            # Restore the selected model as soon as Steam announces the launch.
+            # The normal watcher also handles a still-open Quick Access menu.
+            try:
+                await self._tick_async(now, False)
+            except module_runtime.ControllerPaused:
+                pass
         return {}
 
     def _confirmed_empty(self, now):
@@ -123,39 +139,60 @@ class Plugin:
                 and 0 <= now - self._qam_seen_at < QAM_LEASE_SECONDS and not self._qam_blocks_switch(now))
 
     def _recover_empty_menu(self, target, now):
-        loss = self._empty_since
-        if (not target or not self._confirmed_empty(now) or loss == self._reconnected_loss
-                or now - self._reconnected_at < RECONNECT_COOLDOWN):
+        def unverified_exit(at):
+            return (self._unverified_exit is not None and self._qam_seen_at - self._unverified_exit >= STEAM_EMPTY_SECONDS
+                    and 0 <= at - self._qam_seen_at < QAM_LEASE_SECONDS and not self._qam_blocks_switch(at))
+
+        empty = self._confirmed_empty(now)
+        loss = self._empty_since if empty else self._unverified_exit
+        if not target or self._menu_override or not (empty or unverified_exit(now)):
+            return
+        fallback = loss == self._reconnected_loss
+        if fallback:
+            if not empty or loss == self._fallback_loss or self._qam_seen_at - self._reconnected_at < QAM_LEASE_SECONDS:
+                return
+        elif now - self._reconnected_at < RECONNECT_COOLDOWN and self._last_exit == self._reconnected_exit:
             return
         def still_missing():
-            return self._running and self._empty_since == loss and self._confirmed_empty(time.monotonic())
+            at = time.monotonic()
+            if not self._running:
+                return False
+            if empty:
+                return self._empty_since == loss and self._confirmed_empty(at)
+            return self._unverified_exit == loss and unverified_exit(at)
         try:
-            if not self._controller._reconnect_emulation(target, still_missing):
+            active = self._controller._reconnect_emulation(target, still_missing, fallback=fallback)
+            if not active:
+                if fallback:
+                    self._fallback_loss = loss
                 return
+            if fallback:
+                self._menu_override = (target, active)
+                event("emulation", "steam_menu_fallback", mode=active)
+            else:
+                event("emulation", "steam_menu_reconnected", mode=target)
         except (controller_backend.ControllerError, controller_emulation.InputPlumberError) as exc:
             event("emulation", "steam_menu_reconnect_failed", level="warning", mode=target, error=exc)
-        else:
-            event("emulation", "steam_menu_reconnected", mode=target)
+        if fallback:
+            self._fallback_loss = loss
         self._reconnected_loss = loss
+        self._reconnected_exit = self._last_exit
         self._reconnected_at = time.monotonic()
         self._awaiting_steam = True
 
     def _refresh_steam(self, target, now, resumed):
         nodes = controller_emulation.sony_discovery_nodes(target)
-        reconnect = bool(nodes) and self._menu_add_pending
-        changed = nodes != self._steam_nodes or resumed or reconnect
+        changed = nodes != self._steam_nodes or resumed
         if changed:
             self._steam_nodes = nodes
             self._discovery_retry_at = None
-            self._discovery_reconnect = reconnect
         elif self._discovery_retry_at is None or now < self._discovery_retry_at:
             return
         if not nodes:
             return
-        self._menu_add_pending = False
         self._discovery_retry_at = None
         try:
-            controller_emulation.refresh_steam_detection(nodes, reconnect=self._discovery_reconnect)
+            controller_emulation.refresh_steam_detection(nodes)
         except controller_emulation.InputPlumberError as exc:
             if changed:
                 self._discovery_retry_at = now + 10.0
@@ -170,14 +207,14 @@ class Plugin:
             if game_exited and now - last_exit < QAM_SETTLE_SECONDS:
                 return
             if self._game_running:
-                self._menu_add_pending = False
+                self._menu_override = None
             if game_exited:
                 self._handled_exit = last_exit
-                self._menu_add_pending = True
             self._deferred_at = None
-            target = self._controller._sync_emulation(now=now, resumed=resumed, game_exited=game_exited)
-            if target and controller_emulation.GAMEPADS.get(target) not in controller_emulation.SONY_PRODUCTS:
-                self._menu_add_pending = False
+            target = self._controller._sync_emulation(now=now, resumed=resumed, game_exited=game_exited,
+                                                      menu_override=self._menu_override,
+                                                      repair_menu=self._confirmed_empty(now),
+                                                      observe_system=self._game_running)
             self._refresh_steam(target, now, resumed)
             self._recover_empty_menu(target, now)
             return True
@@ -224,9 +261,10 @@ class Plugin:
         await module_runtime.drain("emulation")
         self._game_running = False
         self._last_exit = self._handled_exit = None
-        self._menu_add_pending = False
-        self._discovery_reconnect = False
+        self._unverified_exit = None
+        self._menu_override = self._fallback_loss = None
         self._empty_since = self._reconnected_loss = None
+        self._reconnected_exit = None
         self._empty_checked = self._awaiting_steam = False
         self._reconnected_at = float("-inf")
         await _offload(self._controller._sync_emulation, release=True)
