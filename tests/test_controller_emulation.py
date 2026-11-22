@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import asyncio
+import os
 import tempfile
 import types
 import unittest
@@ -29,6 +30,7 @@ class TargetTests(unittest.TestCase):
             self.assertEqual(emulation.modes(DEVICE),
                              {"steam": "deck", "ds5": "ds5", "ds5-edge": "ds5-edge-usb"})
 
+    @unittest.skipUnless(os.name == "posix", "Linux sysfs names require colons")
     def test_steam_discovery_is_scoped_to_the_virtual_sony_hidraw_node(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
